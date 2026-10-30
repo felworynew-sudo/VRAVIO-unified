@@ -6,4 +6,5 @@
 /src-tauri/icons/Square*Logo.png
 /src-tauri/icons/StoreLogo.png
 /node_modules/
+/work/
 *.log

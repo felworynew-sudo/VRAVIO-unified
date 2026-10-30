@@ -37,6 +37,12 @@ if (-not (Test-Path $filmSource)) { throw "Missing web bundle: $filmSource" }
 $filmTarget = Join-Path $dist 'editors\video'
 New-Item -ItemType Directory -Force $filmTarget | Out-Null
 Copy-Item (Join-Path $filmSource '*') $filmTarget -Recurse -Force
+$vectorIcons = Join-Path $dist 'editors/vector/icons'
+if (Test-Path $vectorIcons) {
+  Copy-Item (Join-Path $root 'assets/логотип цветная плашка.svg') (Join-Path $vectorIcons 'ai.storyteller.vectorcraft.svg') -Force
+  Copy-Item (Join-Path $root 'src-tauri/icons/32x32.png') (Join-Path $vectorIcons '32/ai.storyteller.vectorcraft.png') -Force
+  Copy-Item (Join-Path $root 'src-tauri/icons/128x128@2x.png') (Join-Path $vectorIcons '256/ai.storyteller.vectorcraft.png') -Force
+}
 foreach ($page in (Get-ChildItem (Join-Path $dist 'editors') -Recurse -Filter '*.html' -File)) {
   $html = [IO.File]::ReadAllText($page.FullName)
   foreach ($sourceName in @('PhotoCraft','VectorCraft','FilmCraft','SoundCraft','ArtCraft')) {

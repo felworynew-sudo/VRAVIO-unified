@@ -1,6 +1,12 @@
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
 
+foreach ($repo in @('photocraft','vectorcraft','filmcraft','soundcraft')) {
+  Copy-Item (Join-Path $root 'src-tauri/icons/128x128.png') (Join-Path $root "upstream/$repo/assets/vravio-icon.png") -Force
+}
+Copy-Item (Join-Path $root 'assets/wordmark-white.png') (Join-Path $root 'upstream/filmcraft/assets/vravio-wordmark-white.png') -Force
+Copy-Item (Join-Path $root 'assets/wordmark-black.png') (Join-Path $root 'upstream/filmcraft/assets/vravio-wordmark-black.png') -Force
+
 function Replace-Exact([string]$relative, [string]$old, [string]$new) {
   $file = Join-Path $root $relative
   $text = [IO.File]::ReadAllText($file).Replace("`r`n", "`n")
@@ -25,6 +31,14 @@ Replace-Exact 'upstream/soundcraft/crates/ui-egui/src/theme.rs' 'accent: Color32
 Replace-Exact 'upstream/soundcraft/crates/ui-egui/src/theme.rs' 'accent: Color32::from_rgb(62, 116, 180)' 'accent: Color32::from_rgb(255, 182, 0)'
 Replace-Exact 'upstream/filmcraft/crates/ui-egui/src/theme.rs' 'accent: Color32::from_rgb(0x2f, 0x6b, 0xdf)' 'accent: Color32::from_rgb(0xff, 0x00, 0x00)'
 Replace-Exact 'upstream/filmcraft/crates/ui-egui/src/theme.rs' 'accent_hover: Color32::from_rgb(0x3f, 0x7c, 0xe8)' 'accent_hover: Color32::from_rgb(0xff, 0x44, 0x44)'
+Replace-Exact 'upstream/photocraft/crates/ui-egui/src/lib.rs' 'assets/app-icon/hicolor/128x128/apps/ai.storyteller.photocraft.png' 'assets/vravio-icon.png'
+Replace-Exact 'upstream/photocraft/crates/ui-egui/src/panels/brand.rs' 'assets/app-icon/hicolor/128x128/apps/ai.storyteller.photocraft.png' 'assets/vravio-icon.png'
+Replace-Exact 'upstream/vectorcraft/crates/ui-egui/src/lib.rs' 'assets/app-icon/hicolor/128x128/apps/ai.storyteller.vectorcraft.png' 'assets/vravio-icon.png'
+Replace-Exact 'upstream/vectorcraft/crates/ui-egui/src/brand.rs' 'assets/app-icon/hicolor/128x128/apps/ai.storyteller.vectorcraft.png' 'assets/vravio-icon.png'
+Replace-Exact 'upstream/filmcraft/crates/ui-egui/src/lib.rs' 'assets/app-icon/hicolor/128x128/apps/ai.storyteller.filmcraft.png' 'assets/vravio-icon.png'
+Replace-Exact 'upstream/filmcraft/crates/ui-egui/src/brand.rs' 'docs/brand/artcraft-logo-white.png' 'assets/vravio-wordmark-white.png'
+Replace-Exact 'upstream/filmcraft/crates/ui-egui/src/brand.rs' 'docs/brand/artcraft-logo.png' 'assets/vravio-wordmark-black.png'
+Replace-Exact 'upstream/soundcraft/crates/ui-egui/src/lib.rs' 'assets/app-icon/hicolor/128x128/apps/ai.storyteller.soundcraft.png' 'assets/vravio-icon.png'
 
 $names = @{ 'PhotoCraft'='VRAVIO'; 'VectorCraft'='VRAVIO'; 'FilmCraft'='VRAVIO'; 'SoundCraft'='VRAVIO'; 'ArtCraft'='VRAVIO' }
 foreach ($repo in @('photocraft','vectorcraft','filmcraft','soundcraft')) {
