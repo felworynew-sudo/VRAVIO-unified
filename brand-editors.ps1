@@ -44,6 +44,9 @@ Replace-Exact 'upstream/filmcraft/crates/ui-egui/src/brand.rs' 'docs/brand/artcr
 Replace-Exact 'upstream/filmcraft/crates/ui-egui/src/brand.rs' 'docs/brand/artcraft-logo.png' 'assets/vravio-wordmark-black.png'
 Replace-Exact 'upstream/soundcraft/crates/ui-egui/src/lib.rs' 'assets/app-icon/hicolor/128x128/apps/ai.storyteller.soundcraft.png' 'assets/vravio-icon.png'
 Replace-Exact 'upstream/soundcraft/apps/soundcraft-web/index.html' '../../assets/app-icon/hicolor/64x64/apps/ai.storyteller.soundcraft.png' '../../assets/vravio-icon.png'
+Replace-Exact 'upstream/soundcraft/crates/ui-egui/src/panels/about.rs' 'An open-source digital audio workstation from the ArtCraft team.' 'An open-source digital audio workstation built with Rust.'
+Replace-Exact 'upstream/vectorcraft/crates/ui-egui/src/dialogs/about.rs' 'Part of ArtCraft. MIT OR Apache-2.0. Fonts: Source Sans 3, Inter, JetBrains Mono (OFL). Icons: Lucide (ISC) + VectorCraft.' 'Open-source software. MIT OR Apache-2.0. Fonts: Source Sans 3, Inter, JetBrains Mono (OFL). Icons: Lucide (ISC) plus original artwork.'
+Replace-Exact 'upstream/filmcraft/crates/ui-egui/src/panels/dialogs.rs' 'A clean-room, pure-Rust non-linear video editor. Part of the ArtCraft family.' 'A clean-room, pure-Rust non-linear video editor.'
 
 $names = @{ 'PhotoCraft'='VRAVIO'; 'VectorCraft'='VRAVIO'; 'FilmCraft'='VRAVIO'; 'SoundCraft'='VRAVIO'; 'ArtCraft'='VRAVIO' }
 foreach ($repo in @('photocraft','vectorcraft','filmcraft','soundcraft')) {
