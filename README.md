@@ -22,6 +22,6 @@ The launcher alone can be built quickly with `.\build-web.ps1 -ShellOnly`, thoug
 
 ## Current integration boundary
 
-Each tab is an independent editor instance. The launcher preserves live frames while changing tabs and restores the tab list after restart; the editors retain their own document persistence and file formats. Closing a tab unloads its editor, so save work in that editor first. Cross-environment copy/paste, one shared document model, and a shell-level unsaved-changes check are not implemented yet. The upstream editors still contain their own product names and links inside their canvas UI; removing those requires focused UI patches in the editor sources.
+Each environment gets one live editor frame. The launcher preserves it while changing tabs and restores the tab list after restart; the editors retain their own document persistence, internal document tabs and file formats. Opening an environment already in the shell selects that frame. Closing a tab unloads its editor after a save reminder. Cross-environment copy/paste, one shared document model, mixed document tabs at the shell level, and a shell-level unsaved-changes check are not implemented yet. The upstream editors still contain their own product names and links inside their canvas UI; removing those requires focused UI patches in the editor sources.
 
 The four sources are Git submodules pinned to specific commits. Their own MIT/Apache-2.0 license texts and notices remain in their repositories. VRAVIO's launcher is separate code; no upstream source is modified here.

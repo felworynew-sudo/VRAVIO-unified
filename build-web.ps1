@@ -9,6 +9,7 @@ Copy-Item (Join-Path $root 'assets\logo.svg') (Join-Path $dist 'assets') -Force
 foreach ($kind in @('raster','vector','audio','video')) { Copy-Item (Join-Path $root "assets\$kind.svg") (Join-Path $dist 'assets') -Force }
 if ($ShellOnly) { Write-Output "Shell built: $dist"; return }
 if (-not (Get-Command trunk -ErrorAction SilentlyContinue)) { throw 'Install Trunk: cargo install trunk --locked' }
+& (Join-Path $root 'brand-editors.ps1')
 $apps = @(
   @{ kind='raster'; repo='photocraft'; app='photocraft-web' },
   @{ kind='vector'; repo='vectorcraft'; app='vectorcraft-web' },
@@ -36,4 +37,14 @@ if (-not (Test-Path $filmSource)) { throw "Missing web bundle: $filmSource" }
 $filmTarget = Join-Path $dist 'editors\video'
 New-Item -ItemType Directory -Force $filmTarget | Out-Null
 Copy-Item (Join-Path $filmSource '*') $filmTarget -Recurse -Force
+foreach ($page in (Get-ChildItem (Join-Path $dist 'editors') -Recurse -Filter '*.html' -File)) {
+  $html = [IO.File]::ReadAllText($page.FullName)
+  foreach ($sourceName in @('PhotoCraft','VectorCraft','FilmCraft','SoundCraft','ArtCraft')) {
+    $html = $html.Replace($sourceName, 'VRAVIO')
+  }
+  [IO.File]::WriteAllText($page.FullName, $html, [Text.UTF8Encoding]::new($false))
+}
+if (Test-Path (Join-Path $root 'src-tauri\icons\icon.png')) {
+  Copy-Item (Join-Path $root 'src-tauri\icons\icon.png') (Join-Path $filmTarget 'favicon.png') -Force
+}
 Write-Output "VRAVIO web bundle built: $dist"

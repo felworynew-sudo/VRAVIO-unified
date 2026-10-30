@@ -5,7 +5,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 #app { display: grid; grid-template-rows: 47px 38px minmax(0, 1fr); }
 .topbar { display: flex; align-items: center; gap: 14px; padding: 0 15px; background: #191c22; border-bottom: 1px solid #323844; }
 .brand { display: flex; align-items: center; gap: 10px; border: 0; background: transparent; font-weight: 800; font-size: 14px; letter-spacing: .14em; }
-.brand img { width: 27px; height: 27px; object-fit: contain; }
+.brand img { width: 105px; height: 31px; object-fit: contain; }
 .divider { width: 1px; height: 22px; background: #323844; }
 .new-button, #welcome-new { border: 1px solid #404754; background: #2a303a; border-radius: 7px; padding: 6px 12px; }
 .new-button:hover, #welcome-new:hover { border-color: #84a8ff; background: #313949; }
@@ -25,7 +25,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .editor-frame.active { display: block; }
 .editor-frame iframe { width: 100%; height: 100%; display: block; border: 0; background: #111318; }
 .welcome { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
-.welcome img { width: 84px; height: 84px; object-fit: contain; }
+.welcome img { width: 245px; height: 90px; object-fit: contain; }
 .welcome h1 { font-size: 26px; margin: 20px 0 0; }
 .welcome p { color: #929baa; margin: 10px 0 25px; }
 .scrim { position: fixed; inset: 0; display: grid; place-items: center; z-index: 10; background: #06080cba; padding: 20px; }

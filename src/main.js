@@ -17,7 +17,12 @@ function load() {
   try {
     const saved = JSON.parse(localStorage.getItem(storageKey) || '{}');
     if (Array.isArray(saved.tabs)) {
-      tabs = saved.tabs.filter(t => environments[t.kind] && Number.isInteger(t.id)).slice(0, 24);
+      const seen = new Set();
+      tabs = saved.tabs.filter(t => {
+        if (!environments[t.kind] || !Number.isInteger(t.id) || seen.has(t.kind)) return false;
+        seen.add(t.kind);
+        return true;
+      });
       nextId = Math.max(0, ...tabs.map(t => t.id)) + 1;
       activeId = tabs.some(t => t.id === saved.activeId) ? saved.activeId : tabs[0]?.id ?? null;
     }
@@ -30,9 +35,11 @@ function escapeHtml(value) {
   return String(value).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]);
 }
 function openTab(kind) {
-  if (!environments[kind] || tabs.length >= 24) return;
+  if (!environments[kind]) return;
+  const existing = tabs.find(t => t.kind === kind);
+  if (existing) { chooserOpen = false; selectTab(existing.id); return; }
   const id = nextId++;
-  tabs.push({ id, kind, title: `${environments[kind].name} ${tabs.filter(t => t.kind === kind).length + 1}` });
+  tabs.push({ id, kind, title: environments[kind].name });
   activeId = id;
   chooserOpen = false;
   save();
@@ -47,6 +54,7 @@ function selectTab(id) {
 function closeTab(id) {
   const index = tabs.findIndex(t => t.id === id);
   if (index < 0) return;
+  if (!window.confirm('Закрыть вкладку? Сохраните изменения в редакторе перед закрытием.')) return;
   tabs.splice(index, 1);
   if (activeId === id) activeId = tabs[Math.min(index, tabs.length - 1)]?.id ?? null;
   save();
@@ -65,7 +73,7 @@ function render() {
   const active = tabs.find(t => t.id === activeId);
   if (!app.querySelector('.workarea')) app.innerHTML = `
     <header class="topbar">
-      <button class="brand" id="home" title="Начальная страница"><img src="${local('assets/logo.svg')}" alt=""><span>VRAVIO</span></button>
+      <button class="brand" id="home" title="Начальная страница"><img src="${local('assets/logo.svg')}" alt="VRAVIO"></button>
       <span class="divider"></span>
       <button class="new-button" id="new" title="Новый документ (Ctrl+N)">＋ <span>Создать</span></button>
       <div class="topbar-spacer"></div>
@@ -105,6 +113,20 @@ function render() {
       iframe.title = tab.title;
       iframe.allow = 'fullscreen; clipboard-read; clipboard-write; microphone';
       iframe.setAttribute('loading', tab.id === activeId ? 'eager' : 'lazy');
+      iframe.addEventListener('load', () => {
+        try {
+          const child = iframe.contentWindow;
+          child.open = (url, ...args) => {
+            const destination = new URL(url, child.location.href);
+            return destination.origin === window.location.origin ? window.open(destination.href, ...args) : null;
+          };
+          child.document.addEventListener('click', event => {
+            const link = event.target.closest?.('a[href]');
+            if (!link || link.hasAttribute('download') || link.href.startsWith('blob:')) return;
+            if (new URL(link.href).origin !== window.location.origin) event.preventDefault();
+          }, true);
+        } catch { /* A future cross-origin editor remains usable without this guard. */ }
+      });
       frames.set(tab.id, iframe);
       holder.append(iframe);
     }
