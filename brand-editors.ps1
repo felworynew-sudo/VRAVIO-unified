@@ -24,9 +24,13 @@ function Replace-Exact([string]$relative, [string]$old, [string]$new) {
 Replace-Exact 'upstream/photocraft/crates/ui-egui/src/theme.rs' 'accent: Color32::from_rgb(139, 124, 246)' 'accent: Color32::from_rgb(161, 0, 255)'
 Replace-Exact 'upstream/photocraft/crates/ui-egui/src/theme.rs' "    #[default]`n    ProMedium," "    ProMedium,"
 Replace-Exact 'upstream/photocraft/crates/ui-egui/src/theme.rs' "    Studio,`n    StudioLight," "    #[default]`n    Studio,`n    StudioLight,"
+Replace-Exact 'upstream/photocraft/crates/engine/src/prefs.rs' 'default ProMedium);' 'default Studio);'
+Replace-Exact 'upstream/photocraft/crates/engine/src/prefs.rs' 'theme: Theme::ProMedium,' 'theme: Theme::Studio,'
+Replace-Exact 'upstream/photocraft/crates/engine/src/prefs.rs' 'dark_theme: DarkTheme::ProMedium,' 'dark_theme: DarkTheme::Studio,'
 Replace-Exact 'upstream/vectorcraft/crates/ui-egui/src/theme.rs' "    #[default]`n    Coral,`n    Blue," "    Coral,`n    #[default]`n    Blue,"
 Replace-Exact 'upstream/vectorcraft/crates/ui-egui/src/theme.rs' '(0x5b96ff, 0x2f74f0)' '(0x0068ff, 0x005ce6)'
 Replace-Exact 'upstream/vectorcraft/crates/ui-egui/src/theme.rs' '(0x2563eb, 0x1f5ad6)' '(0x0068ff, 0x005ce6)'
+Replace-Exact 'upstream/vectorcraft/crates/engine/src/prefs.rs' 'ui_accent: s("coral"),' 'ui_accent: s("blue"),'
 Replace-Exact 'upstream/soundcraft/crates/ui-egui/src/theme.rs' 'accent: Color32::from_rgb(64, 132, 196)' 'accent: Color32::from_rgb(255, 182, 0)'
 Replace-Exact 'upstream/soundcraft/crates/ui-egui/src/theme.rs' 'accent: Color32::from_rgb(62, 116, 180)' 'accent: Color32::from_rgb(255, 182, 0)'
 Replace-Exact 'upstream/filmcraft/crates/ui-egui/src/theme.rs' 'accent: Color32::from_rgb(0x2f, 0x6b, 0xdf)' 'accent: Color32::from_rgb(0xff, 0x00, 0x00)'
