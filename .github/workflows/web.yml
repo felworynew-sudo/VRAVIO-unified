@@ -1,0 +1,51 @@
+name: Build web
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: vravio-pages
+  cancel-in-progress: true
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      CARGO_BUILD_JOBS: 2
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            upstream/photocraft
+            upstream/vectorcraft
+            upstream/filmcraft
+            upstream/soundcraft
+      - name: Install web build tools
+        run: |
+          cargo install trunk --locked
+          cargo install wasm-bindgen-cli --version 0.2.129 --locked
+      - name: Build four editors and shell
+        shell: pwsh
+        run: ./build-web.ps1
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

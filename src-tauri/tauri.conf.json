@@ -1,0 +1,12 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "VRAVIO",
+  "version": "0.1.0",
+  "identifier": "com.vravio.studio",
+  "build": { "frontendDist": "../dist" },
+  "app": {
+    "windows": [{ "title": "VRAVIO", "width": 1440, "height": 900, "minWidth": 850, "minHeight": 580, "backgroundColor": "#111318" }],
+    "security": { "csp": null }
+  },
+  "bundle": { "active": true, "targets": ["nsis"] }
+}

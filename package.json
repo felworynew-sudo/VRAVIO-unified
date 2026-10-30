@@ -1,0 +1,14 @@
+{
+  "name": "vravio-unified",
+  "private": true,
+  "type": "module",
+  "version": "0.1.0",
+  "scripts": {
+    "build:shell": "powershell -NoProfile -File build-web.ps1 -ShellOnly",
+    "build:web": "powershell -NoProfile -File build-web.ps1",
+    "build:desktop": "npm run build:web && tauri build"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.0.0"
+  }
+}
