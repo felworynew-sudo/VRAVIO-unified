@@ -66,6 +66,7 @@ function renameTab(id) {
   const name = prompt('Название вкладки', tab.title);
   if (name === null) return;
   tab.title = name.trim().slice(0, 80) || tab.title;
+  tab.customTitle = true;
   save();
   render();
 }
@@ -130,6 +131,8 @@ function render() {
       frames.set(tab.id, iframe);
       holder.append(iframe);
     }
+    holder.setAttribute('aria-label', tab.title);
+    frames.get(tab.id).title = tab.title;
   }
   app.querySelector('#new').onclick = showChooser;
   app.querySelector('#add').onclick = showChooser;
@@ -145,6 +148,17 @@ function render() {
   app.querySelectorAll('[data-close]').forEach(el => el.onclick = () => closeTab(Number(el.dataset.close)));
 }
 const frames = new Map();
+setInterval(() => {
+  const tab = tabs.find(t => t.id === activeId);
+  if (!tab || tab.customTitle) return;
+  try {
+    const raw = frames.get(tab.id)?.contentDocument?.title || '';
+    const title = raw.replace(/PhotoCraft|VectorCraft|FilmCraft|SoundCraft|ArtCraft|VRAVIO/gi, '')
+      .replace(/^[\s—–|:]+|[\s—–|:]+$/g, '').trim().slice(0, 80);
+    const next = title || environments[tab.kind].name;
+    if (next !== tab.title) { tab.title = next; save(); render(); }
+  } catch { /* The editor can still be used if its title cannot be read. */ }
+}, 2000);
 function showChooser() { chooserOpen = true; render(); }
 function hideChooser() { chooserOpen = false; render(); }
 document.addEventListener('keydown', event => {
