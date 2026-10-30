@@ -47,4 +47,12 @@ foreach ($page in (Get-ChildItem (Join-Path $dist 'editors') -Recurse -Filter '*
 if (Test-Path (Join-Path $root 'src-tauri\icons\icon.png')) {
   Copy-Item (Join-Path $root 'src-tauri\icons\icon.png') (Join-Path $filmTarget 'favicon.png') -Force
 }
+$notices = Join-Path $dist 'third-party-notices'
+foreach ($repoName in @('photocraft','vectorcraft','filmcraft','soundcraft')) {
+  $noticeDir = Join-Path $notices $repoName
+  New-Item -ItemType Directory -Force $noticeDir | Out-Null
+  foreach ($name in @('LICENSE-MIT','LICENSE-APACHE','NOTICE')) {
+    Copy-Item (Join-Path $root "upstream/$repoName/$name") $noticeDir -Force
+  }
+}
 Write-Output "VRAVIO web bundle built: $dist"
