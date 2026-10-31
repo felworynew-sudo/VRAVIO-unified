@@ -12,7 +12,24 @@ let activeId = null;
 let nextId = 1;
 let chooserOpen = false;
 let restorerSource = null;
+const bridgeToken = location.hash.match(/^#bridge=([a-f0-9]{32})$/)?.[1] || null;
+const bridge = bridgeToken && window.opener ? { token: bridgeToken, opener: window.opener, origin: null, payload: null, rasterReady: false, sent: false } : null;
 const app = document.querySelector('#app');
+
+function deliverBridgePhoto() {
+  if (!bridge?.rasterReady || !bridge.payload || bridge.sent) return;
+  const raster = tabs.find(t => t.kind === 'raster');
+  const target = raster && frames.get(raster.id)?.contentWindow;
+  if (!target) return;
+  target.postMessage({ type: 'vravio-bridge:open', name: `vravio-bridge-${bridge.token}.png`, bytes: bridge.payload }, location.origin);
+  bridge.sent = true;
+  bridge.payload = null;
+}
+function announceBridge() {
+  if (!bridge || bridge.origin) return;
+  try { if (!bridge.opener.closed) bridge.opener.postMessage({ type: 'vravio-bridge:ready', version: 1, token: bridge.token }, '*'); } catch { /* opener was closed */ }
+}
+if (bridge) { announceBridge(); setInterval(announceBridge, 1000); }
 
 function load() {
   try {
@@ -70,6 +87,7 @@ function render() {
         <button class="tab-close" data-close="${t.id}" aria-label="Закрыть среду ${environments[t.kind].name}">×</button>
       </div>`).join('')}
       <button class="tab-add" id="add" title="Открыть рабочую среду" aria-label="Открыть рабочую среду">＋</button>`;
+  if (bridge) app.querySelector('.tabs').insertAdjacentHTML('beforeend', '<span class="bridge-label" title="Ctrl+S отправит результат в сортировщик">Связано с сортировщиком · Ctrl+S для возврата</span>');
   const workarea = app.querySelector('.workarea');
   workarea.querySelector('.welcome')?.remove();
   if (!active) workarea.insertAdjacentHTML('beforeend', `<div class="welcome"><img src="${local('assets/logo.svg')}" alt="VRAVIO"><h1>Выберите рабочую среду</h1><p>Растр, вектор, аудио и видео в одном окне.</p><button id="welcome-new">Открыть среду</button></div>`);
@@ -133,8 +151,30 @@ document.addEventListener('keydown', event => {
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'w' && activeId !== null && !chooserOpen) { event.preventDefault(); closeTab(activeId); }
 });
 window.addEventListener('message', event => {
-  if (event.origin !== location.origin) return;
   const message = event.data;
+  if (bridge && event.source === bridge.opener && message?.type === 'vravio-bridge:open') {
+    if (message.version !== 1 || message.token !== bridge.token || (bridge.origin && event.origin !== bridge.origin)) return;
+    const bytes = message.bytes instanceof ArrayBuffer ? new Uint8Array(message.bytes) : message.bytes;
+    if (!(bytes instanceof Uint8Array) || bytes.byteLength > 100_000_000 || bytes.byteLength < 8 || ![137,80,78,71,13,10,26,10].every((n, i) => bytes[i] === n)) return;
+    bridge.origin = event.origin;
+    bridge.payload = bytes;
+    bridge.sent = false;
+    openTab('raster');
+    deliverBridgePhoto();
+    return;
+  }
+  if (event.origin !== location.origin) return;
+  if (bridge && message?.type === 'vravio-bridge:raster-ready') {
+    const raster = tabs.find(t => t.kind === 'raster');
+    if (raster && frames.get(raster.id)?.contentWindow === event.source) { bridge.rasterReady = true; deliverBridgePhoto(); }
+    return;
+  }
+  if (bridge && message?.type === 'vravio-bridge:saved') {
+    const raster = tabs.find(t => t.kind === 'raster');
+    if (!raster || frames.get(raster.id)?.contentWindow !== event.source || message.token !== bridge.token || !bridge.origin) return;
+    try { bridge.opener.postMessage({ type: 'vravio-bridge:saved', version: 1, token: bridge.token, bytes: message.bytes }, bridge.origin); } catch { /* opener was closed */ }
+    return;
+  }
   if (message?.type === 'vravio-restorer-open' || message?.type === 'vravio-cutout-open') {
     const raster = tabs.find(t => t.kind === 'raster');
     if (!raster || frames.get(raster.id)?.contentWindow !== event.source) return;

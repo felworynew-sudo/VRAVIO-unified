@@ -28,6 +28,14 @@ function Insert-Before-Once([string]$relative, [string]$anchor, [string]$marker,
   [IO.File]::WriteAllText($file, $source.Replace($anchor, "$snippet`n$anchor"), [Text.UTF8Encoding]::new($false))
 }
 
+function Insert-After-Once([string]$relative, [string]$anchor, [string]$marker, [string]$snippet) {
+  $file = Join-Path $root $relative
+  $source = [IO.File]::ReadAllText($file).Replace("`r`n", "`n")
+  if ($source.Contains($marker)) { return }
+  if (-not $source.Contains($anchor)) { throw "Missing insertion anchor: $relative" }
+  [IO.File]::WriteAllText($file, $source.Replace($anchor, "$anchor`n$snippet"), [Text.UTF8Encoding]::new($false))
+}
+
 # Only UI color tokens are adjusted. Engines and document formats remain pinned upstream.
 Replace-Exact 'upstream/photocraft/crates/ui-egui/src/theme.rs' 'accent: Color32::from_rgb(139, 124, 246)' 'accent: Color32::from_rgb(161, 0, 255)'
 Replace-Exact 'upstream/photocraft/crates/ui-egui/src/theme.rs' "    #[default]`n    ProMedium," "    ProMedium,"
@@ -123,6 +131,27 @@ $restoreCommand = @'
     }
 '@
 Insert-Before-Once 'upstream/photocraft/crates/ui-egui/src/menus/invoke.rs' '    if id == "help.checkForUpdates" {' 'if id == "filter.vravio.photoRestore"' $restoreCommand
+$bridgeSaveCommand = @'
+    if id == "file.save" {
+        let bridge_token = app.session.active().and_then(|st| {
+            let suffix = st.doc.name.strip_prefix("vravio-bridge-")?;
+            let token = suffix.get(..32)?;
+            token.bytes().all(|c| c.is_ascii_hexdigit()).then(|| token.to_owned())
+        });
+        if let Some(token) = bridge_token {
+            let path = format!("vravio-bridge-result-{token}.png");
+            let doc = app.session.active().ok_or("no document is open".to_string());
+            return Some(doc.and_then(|doc| {
+                let export = app.services.export.as_ref().ok_or("PNG export is unavailable")?;
+                let (bytes, _) = export(&doc.doc, &path, &crate::ExportSettings::default())?;
+                let write = app.services.write.as_mut().ok_or("browser bridge is unavailable")?;
+                write(&path, &bytes)?;
+                Ok(json!({"sent": true}))
+            }));
+        }
+    }
+'@
+Insert-Before-Once 'upstream/photocraft/crates/ui-egui/src/menus/invoke.rs' '    if id == "filter.vravio.photoRestore"' 'let bridge_token = app.session.active()' $bridgeSaveCommand
 Replace-Exact 'upstream/photocraft/crates/ui-egui/src/menus/invoke.rs' 'let write = app.services.write.as_ref().ok_or("browser bridge is unavailable")?;' 'let write = app.services.write.as_mut().ok_or("browser bridge is unavailable")?;'
 Replace-Exact 'upstream/photocraft/crates/ui-egui/src/menus/invoke.rs' 'if id == "filter.vravio.photoRestore" {' 'if id == "filter.vravio.photoRestore" || (id == "layer.removeBackground" && app.services.write_unconfirmed) {'
 Insert-Before-Once 'upstream/photocraft/crates/ui-egui/src/menus/invoke.rs' '        let doc = app.session.active().ok_or("no document is open".to_string());' 'let cutout = id == "layer.removeBackground";' '        let cutout = id == "layer.removeBackground";'
@@ -130,6 +159,30 @@ Insert-Before-Once 'upstream/photocraft/crates/ui-egui/src/menus/invoke.rs' '   
 Replace-Exact 'upstream/photocraft/crates/ui-egui/src/menus/invoke.rs' 'export(&doc.doc, "vravio-restoration-input.png", &crate::ExportSettings::default())?' 'export(&doc.doc, path, &crate::ExportSettings::default())?'
 Replace-Exact 'upstream/photocraft/crates/ui-egui/src/menus/invoke.rs' 'write("vravio-restoration-input.png", &bytes)?;' 'write(path, &bytes)?;'
 $restoreBridge = @'
+fn notify_bridge_ready() {
+    let Some(window) = web_sys::window() else { return };
+    let Ok(parent) = js_sys::Reflect::get(window.as_ref(), &"parent".into()) else { return };
+    let Ok(post) = js_sys::Reflect::get(&parent, &"postMessage".into()) else { return };
+    let Ok(post) = post.dyn_into::<js_sys::Function>() else { return };
+    let message = js_sys::Object::new();
+    let _ = js_sys::Reflect::set(&message, &"type".into(), &"vravio-bridge:raster-ready".into());
+    if let Ok(origin) = window.location().origin() { let _ = post.call2(&parent, &message, &origin.into()); }
+}
+
+fn send_bridge_result(path: &str, bytes: &[u8]) -> Result<(), String> {
+    let js = |e: wasm_bindgen::JsValue| format!("{e:?}");
+    let token = path.strip_prefix("vravio-bridge-result-").and_then(|s| s.strip_suffix(".png")).ok_or("invalid bridge path")?;
+    let window = web_sys::window().ok_or("no window")?;
+    let parent = js_sys::Reflect::get(window.as_ref(), &"parent".into()).map_err(js)?;
+    let post = js_sys::Reflect::get(&parent, &"postMessage".into()).map_err(js)?.dyn_into::<js_sys::Function>().map_err(|_| "no postMessage")?;
+    let message = js_sys::Object::new();
+    js_sys::Reflect::set(&message, &"type".into(), &"vravio-bridge:saved".into()).map_err(js)?;
+    js_sys::Reflect::set(&message, &"token".into(), &token.into()).map_err(js)?;
+    js_sys::Reflect::set(&message, &"bytes".into(), &js_sys::Uint8Array::from(bytes).into()).map_err(js)?;
+    post.call2(&parent, &message, &window.location().origin().map_err(js)?.into()).map_err(js)?;
+    Ok(())
+}
+
 fn send_restore_input(path: &str, bytes: &[u8]) -> Result<(), String> {
     let js = |e: wasm_bindgen::JsValue| format!("{e:?}");
     let window = web_sys::window().ok_or("no window")?;
@@ -151,6 +204,15 @@ fn listen_restore_result(inbox: Inbox, cutout_inbox: CutoutInbox, ctx: egui::Con
         if window.location().origin().ok().as_deref() != Some(event.origin().as_str()) { return }
         let data = event.data();
         let kind = js_sys::Reflect::get(&data, &"type".into()).ok().and_then(|v| v.as_string());
+        if kind.as_deref() == Some("vravio-bridge:open") {
+            let name = js_sys::Reflect::get(&data, &"name".into()).ok().and_then(|v| v.as_string()).unwrap_or_default();
+            if !name.starts_with("vravio-bridge-") || !name.ends_with(".png") { return }
+            let bytes = js_sys::Uint8Array::new(&js_sys::Reflect::get(&data, &"bytes".into()).unwrap_or_default()).to_vec();
+            if bytes.len() > 100_000_000 || !bytes.starts_with(b"\x89PNG\r\n\x1a\n") { return }
+            inbox.lock().unwrap_or_else(PoisonError::into_inner).push((name, bytes));
+            ctx.request_repaint();
+            return;
+        }
         if !matches!(kind.as_deref(), Some("vravio-restorer-result" | "vravio-cutout-result")) { return }
         let bytes = js_sys::Uint8Array::new(&js_sys::Reflect::get(&data, &"bytes".into()).unwrap_or_default()).to_vec();
         if kind.as_deref() == Some("vravio-cutout-result") {
@@ -211,7 +273,9 @@ Replace-Exact 'upstream/photocraft/apps/photocraft-web/src/web.rs' 'js_sys::Refl
 Replace-Exact 'upstream/photocraft/apps/photocraft-web/src/web.rs' 'move |event| {' 'move |event: web_sys::MessageEvent| {'
 Replace-Exact 'upstream/photocraft/apps/photocraft-web/Cargo.toml' '"BeforeUnloadEvent", "AbortController"' '"BeforeUnloadEvent", "MessageEvent", "AbortController"'
 Insert-Before-Once 'upstream/photocraft/apps/photocraft-web/src/web.rs' '                    let place_inbox: Inbox = Arc::default();' 'listen_restore_result(inbox.clone(),' "                    let cutout_inbox: CutoutInbox = Arc::default();`n                    listen_restore_result(inbox.clone(), cutout_inbox.clone(), cc.egui_ctx.clone());"
-Replace-Exact 'upstream/photocraft/apps/photocraft-web/src/web.rs' "fn download(path: &str, bytes: &[u8]) -> Result<(), String> {`n    let js =" "fn download(path: &str, bytes: &[u8]) -> Result<(), String> {`n    if path.ends_with(`"vravio-restoration-input.png`") || path.ends_with(`"vravio-cutout-input.png`") { return send_restore_input(path, bytes); }`n    let js ="
+Insert-Before-Once 'upstream/photocraft/apps/photocraft-web/src/web.rs' '                    let place_inbox: Inbox = Arc::default();' 'notify_bridge_ready();' '                    notify_bridge_ready();'
+Insert-After-Once 'upstream/photocraft/apps/photocraft-web/src/web.rs' 'fn download(path: &str, bytes: &[u8]) -> Result<(), String> {' 'return send_restore_input(path, bytes);' '    if path.ends_with("vravio-restoration-input.png") || path.ends_with("vravio-cutout-input.png") { return send_restore_input(path, bytes); }'
+Insert-After-Once 'upstream/photocraft/apps/photocraft-web/src/web.rs' 'fn download(path: &str, bytes: &[u8]) -> Result<(), String> {' 'return send_bridge_result(path, bytes);' '    if path.starts_with("vravio-bridge-result-") && path.ends_with(".png") { return send_bridge_result(path, bytes); }'
 Replace-Exact 'upstream/filmcraft/crates/ui-egui/src/theme.rs' 'accent: Color32::from_rgb(0x2f, 0x6b, 0xdf)' 'accent: Color32::from_rgb(0xff, 0x00, 0x00)'
 Replace-Exact 'upstream/filmcraft/crates/ui-egui/src/theme.rs' 'accent_hover: Color32::from_rgb(0x3f, 0x7c, 0xe8)' 'accent_hover: Color32::from_rgb(0xff, 0x44, 0x44)'
 Replace-Exact 'upstream/photocraft/crates/ui-egui/src/lib.rs' 'assets/app-icon/hicolor/128x128/apps/ai.storyteller.photocraft.png' 'assets/vravio-icon.png'
