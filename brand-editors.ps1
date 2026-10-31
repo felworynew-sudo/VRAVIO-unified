@@ -296,6 +296,7 @@ Insert-After-Once 'upstream/photocraft/apps/photocraft-web/src/web.rs' 'fn downl
 Replace-Exact 'upstream/filmcraft/crates/ui-egui/src/theme.rs' 'accent: Color32::from_rgb(0x2f, 0x6b, 0xdf)' 'accent: Color32::from_rgb(0xff, 0x00, 0x00)'
 Replace-Exact 'upstream/filmcraft/crates/ui-egui/src/theme.rs' 'accent_hover: Color32::from_rgb(0x3f, 0x7c, 0xe8)' 'accent_hover: Color32::from_rgb(0xff, 0x44, 0x44)'
 Replace-Exact 'upstream/vectorcraft/crates/ui-egui/src/state.rs' 'brightness: Brightness::MediumDark,' 'brightness: Brightness::Dark,'
+Replace-Exact 'upstream/vectorcraft/crates/engine/src/prefs.rs' 'ui_brightness: s("mediumDark"),' 'ui_brightness: s("dark"),'
 Replace-Exact 'upstream/photocraft/crates/ui-egui/src/file_open.rs' '    pub(crate) fn place_bytes(&mut self, name: &str, bytes: Vec<u8>, linked: Option<String>)' '    pub fn place_bytes(&mut self, name: &str, bytes: Vec<u8>, linked: Option<String>)'
 $webSaveDialog = @'
             // No save dialog on the web: the suggested name becomes the download name.
