@@ -138,7 +138,7 @@ fn send_restore_input(bytes: &[u8]) -> Result<(), String> {
 fn listen_restore_result(inbox: Inbox, ctx: egui::Context) {
     use wasm_bindgen::closure::Closure;
     let Some(window) = web_sys::window() else { return };
-    let cb = Closure::<dyn FnMut(web_sys::MessageEvent)>::new(move |event| {
+    let cb = Closure::<dyn FnMut(web_sys::MessageEvent)>::new(move |event: web_sys::MessageEvent| {
         let Some(window) = web_sys::window() else { return };
         if window.location().origin().ok().as_deref() != Some(event.origin().as_str()) { return }
         let data = event.data();
@@ -152,6 +152,7 @@ fn listen_restore_result(inbox: Inbox, ctx: egui::Context) {
 }
 '@
 Insert-Before-Once 'upstream/photocraft/apps/photocraft-web/src/web.rs' '/// Trigger a browser download of `bytes` named after the last component of `path`.' 'fn send_restore_input(bytes: &[u8])' $restoreBridge
+Replace-Exact 'upstream/photocraft/apps/photocraft-web/src/web.rs' 'move |event| {' 'move |event: web_sys::MessageEvent| {'
 Replace-Exact 'upstream/photocraft/apps/photocraft-web/Cargo.toml' '"BeforeUnloadEvent", "AbortController"' '"BeforeUnloadEvent", "MessageEvent", "AbortController"'
 Insert-Before-Once 'upstream/photocraft/apps/photocraft-web/src/web.rs' '                    let place_inbox: Inbox = Arc::default();' 'listen_restore_result(inbox.clone(), cc.egui_ctx.clone());' '                    listen_restore_result(inbox.clone(), cc.egui_ctx.clone());'
 Replace-Exact 'upstream/photocraft/apps/photocraft-web/src/web.rs' "fn download(path: &str, bytes: &[u8]) -> Result<(), String> {`n" "fn download(path: &str, bytes: &[u8]) -> Result<(), String> {`n    if path.ends_with(`"vravio-restoration-input.png`") { return send_restore_input(bytes); }`n"
