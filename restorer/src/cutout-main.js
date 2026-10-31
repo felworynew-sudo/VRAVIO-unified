@@ -7,7 +7,7 @@ let quality = 'fast';
 
 function render() {
   app.innerHTML = `<header><strong>Удалить фон · AI</strong><button id="close" aria-label="Закрыть">×</button></header>
-    <section class="controls"><label>Модель <select id="quality" ${busy ? 'disabled' : ''}><option value="fast" ${quality === 'fast' ? 'selected' : ''}>Быстро · MODNet (портреты)</option><option value="quality" ${quality === 'quality' ? 'selected' : ''} ${webgpu ? '' : 'disabled'}>Качественно · BiRefNet (любые объекты)</option></select></label>
+    <section class="controls"><label>Модель <select id="quality" ${busy ? 'disabled' : ''}><option value="fast" ${quality === 'fast' ? 'selected' : ''}>Быстро · MODNet (портреты)</option><option value="quality" ${quality === 'quality' ? 'selected' : ''} ${webgpu ? '' : 'disabled'}>Детальнее · BiRefNet 512 (любые объекты)</option></select></label>
     <label>Фото <input id="file" type="file" accept="image/*" ${busy ? 'disabled' : ''}></label></section>
     <div class="preview">${source ? `<img src="${source}" alt="До">` : '<p>Откройте фото в растровом редакторе.</p>'}${result ? `<img src="${result}" alt="Без фона">` : ''}</div>
     <footer><span id="status">${webgpu ? 'WebGPU доступен' : 'Быстрый режим на процессоре'}</span><button id="run" ${!source || busy ? 'disabled' : ''}>Удалить фон</button>${result ? '<button id="apply">Применить маску к слою</button><button id="save">Скачать PNG</button>' : ''}</footer>`;

@@ -4,7 +4,7 @@ import { guidedFilter } from './guidedFilter.js';
 // matte network; the larger general model is an explicit WebGPU quality mode.
 export const CUTOUT_MODELS = {
   fast: { id: 'Xenova/modnet', input: 'input' },
-  quality: { id: 'onnx-community/BiRefNet_lite-ONNX', input: 'input_image', output: 'output_image', sigmoid: true, dtype: 'fp32' },
+  quality: { id: 'studioludens/birefnet-lite-512', input: 'input_image', output: 'logits', sigmoid: true, dtype: 'fp16' },
 };
 
 const cache = new Map();
