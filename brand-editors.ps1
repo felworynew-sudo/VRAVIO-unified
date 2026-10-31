@@ -296,6 +296,24 @@ Replace-Exact 'upstream/filmcraft/crates/ui-egui/src/theme.rs' 'accent: Color32:
 Replace-Exact 'upstream/filmcraft/crates/ui-egui/src/theme.rs' 'accent_hover: Color32::from_rgb(0x3f, 0x7c, 0xe8)' 'accent_hover: Color32::from_rgb(0xff, 0x44, 0x44)'
 Replace-Exact 'upstream/vectorcraft/crates/ui-egui/src/state.rs' 'brightness: Brightness::MediumDark,' 'brightness: Brightness::Dark,'
 Replace-Exact 'upstream/photocraft/crates/ui-egui/src/file_open.rs' '    pub(crate) fn place_bytes(&mut self, name: &str, bytes: Vec<u8>, linked: Option<String>)' '    pub fn place_bytes(&mut self, name: &str, bytes: Vec<u8>, linked: Option<String>)'
+$webSaveDialog = @'
+            // No save dialog on the web: the suggested name becomes the download name.
+            FileDialogRequest::Save { suggested } => {
+                let name = std::path::Path::new(&suggested).file_name().map_or_else(|| suggested.clone(), |n| n.to_string_lossy().to_string());
+                reply.send(Some(FileDialogAnswer::SaveTo(name)));
+            }
+'@
+$vravioSaveDialog = @'
+            FileDialogRequest::Save { suggested } => {
+                let name = std::path::Path::new(&suggested).file_name().map_or_else(|| suggested.clone(), |n| n.to_string_lossy().to_string());
+                let answer = web_sys::window().and_then(|window| window
+                    .prompt_with_message_and_default("Имя и формат файла (.psd, .ora, .png, .jpg, .tif):", &name)
+                    .ok()
+                    .flatten());
+                reply.send(answer.map(FileDialogAnswer::SaveTo));
+            }
+'@
+Replace-Exact 'upstream/photocraft/apps/photocraft-web/src/web.rs' $webSaveDialog $vravioSaveDialog
 Replace-Exact 'upstream/vectorcraft/crates/ui-egui/src/canvas/home.rs' '    ui.label(egui::RichText::new(tl!("Community")).font(theme::semibold(14.0)).color(t.text));' ''
 $audioAppMenu = @'
                 ui.menu_button("VRAVIO", |ui| {
