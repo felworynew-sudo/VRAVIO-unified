@@ -61,4 +61,7 @@ foreach ($repoName in @('photocraft','vectorcraft','filmcraft','soundcraft')) {
     Copy-Item (Join-Path $root "upstream/$repoName/$name") $noticeDir -Force
   }
 }
+if (-not (Test-Path (Join-Path $root 'node_modules/vite/bin/vite.js'))) { throw 'Install web dependencies first: npm ci' }
+& node (Join-Path $root 'node_modules/vite/bin/vite.js') build --config (Join-Path $root 'restorer/vite.config.js')
+if ($LASTEXITCODE -ne 0) { throw 'Build failed: photo restorer' }
 Write-Output "VRAVIO web bundle built: $dist"

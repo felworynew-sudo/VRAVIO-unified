@@ -121,6 +121,7 @@ $restoreCommand = @'
     }
 '@
 Insert-Before-Once 'upstream/photocraft/crates/ui-egui/src/menus/invoke.rs' '    if id == "help.checkForUpdates" {' 'if id == "filter.vravio.photoRestore"' $restoreCommand
+Replace-Exact 'upstream/photocraft/crates/ui-egui/src/menus/invoke.rs' 'let write = app.services.write.as_ref().ok_or("browser bridge is unavailable")?;' 'let write = app.services.write.as_mut().ok_or("browser bridge is unavailable")?;'
 $restoreBridge = @'
 fn send_restore_input(bytes: &[u8]) -> Result<(), String> {
     let js = |e: wasm_bindgen::JsValue| format!("{e:?}");

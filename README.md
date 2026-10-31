@@ -12,6 +12,7 @@ On Windows:
 rustup target add wasm32-unknown-unknown
 cargo install trunk --locked
 cargo install wasm-bindgen-cli --version 0.2.129 --locked
+npm ci
 .\build-web.ps1
 python -m http.server 8080 --directory dist
 ```
@@ -23,5 +24,7 @@ The launcher alone can be built quickly with `.\build-web.ps1 -ShellOnly`, thoug
 ## Current integration boundary
 
 Each environment gets one live editor frame. The launcher preserves it while changing environments and restores the environment strip after restart; the editors retain their own document persistence, internal document tabs and file formats. Opening an environment already in the shell selects that frame. Closing an environment unloads its editor after a save reminder. A single cross-environment document tab strip, cross-environment copy/paste, one shared document model, and a shell-level unsaved-changes check are not implemented yet. The build-time branding pass changes the main UI labels, accent tokens and visible community links; engine diagnostics and less common screens still need a branding audit.
+
+In the raster editor, Filter → Restore Old Photos exports the active document as PNG to an embedded, local-processing restorer. Its result opens as a separate raster document when applied. The processing code is taken from the user's Vetor Studio project; large model weights are requested on demand from `vetor-studio.ru` and are not bundled in the installer. The classic mode also loads open models from Hugging Face on demand. Processing and cached weights stay in the browser; the image is not uploaded. The restorer currently processes the flattened image rather than editing the original layer stack in place.
 
 The four sources are Git submodules pinned to specific commits. Their MIT/Apache-2.0 license texts and notices are copied into `dist/third-party-notices/` for distribution. VRAVIO's launcher is separate code; `brand-editors.ps1` makes UI-only changes in the local build checkout without changing the pinned upstream commits.
