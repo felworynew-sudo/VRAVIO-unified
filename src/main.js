@@ -11,6 +11,7 @@ let tabs = [];
 let activeId = null;
 let nextId = 1;
 let chooserOpen = false;
+let restorerSource = null;
 const app = document.querySelector('#app');
 
 function load() {
@@ -62,7 +63,7 @@ function render() {
   if (!app.querySelector('.workarea')) app.innerHTML = `
     <nav class="tabs" aria-label="Рабочие среды"></nav>
     <main class="workarea"></main>
-    <div id="modal-root"></div>`;
+    <div id="modal-root"></div><div id="restorer-root"></div>`;
   app.querySelector('.tabs').innerHTML = `
       ${tabs.map(t => `<div class="tab ${t.id === activeId ? 'selected' : ''}" style="--accent:${environments[t.kind].color}" data-id="${t.id}">
         <button class="tab-select" data-select="${t.id}" title="${environments[t.kind].name}"><img src="${environments[t.kind].icon}" alt=""><span>${environments[t.kind].name}</span></button>
@@ -130,6 +131,27 @@ document.addEventListener('keydown', event => {
   if (event.key === 'Escape' && chooserOpen) { hideChooser(); return; }
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'n') { event.preventDefault(); showChooser(); }
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'w' && activeId !== null && !chooserOpen) { event.preventDefault(); closeTab(activeId); }
+});
+window.addEventListener('message', event => {
+  if (event.origin !== location.origin) return;
+  const message = event.data;
+  if (message?.type === 'vravio-restorer-open') {
+    const raster = tabs.find(t => t.kind === 'raster');
+    if (!raster || frames.get(raster.id)?.contentWindow !== event.source) return;
+    restorerSource = event.source;
+    const root = document.querySelector('#restorer-root');
+    root.innerHTML = '<div class="restore-scrim"><iframe title="Реставрация старых фото"></iframe></div>';
+    const frame = root.querySelector('iframe');
+    frame.onload = () => frame.contentWindow.postMessage({ type: 'vravio-restorer-input', bytes: message.bytes, name: 'photo.png' }, location.origin);
+    frame.src = local('restorer/');
+  }
+  if (message?.type === 'vravio-restorer-close' || message?.type === 'vravio-restorer-result') {
+    const frame = document.querySelector('#restorer-root iframe');
+    if (frame?.contentWindow !== event.source) return;
+    if (message.type === 'vravio-restorer-result') restorerSource?.postMessage(message, location.origin);
+    document.querySelector('#restorer-root').replaceChildren();
+    restorerSource = null;
+  }
 });
 load();
 render();

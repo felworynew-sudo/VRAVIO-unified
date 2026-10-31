@@ -96,6 +96,64 @@ pub(super) fn selection_glow_segments(painter: &egui::Painter, xf: &ViewXform, s
 '@
 Insert-Before-Once 'upstream/photocraft/crates/ui-egui/src/canvas/paint.rs' '/// Draw boundary segments as marching ants:' 'pub(super) fn selection_glow_segments' $glow
 Insert-Before-Once 'upstream/photocraft/crates/ui-egui/src/canvas.rs' '                marching_ants_segments(input.painter, &shown, segs, time);' 'paint::selection_glow_segments(input.painter, &shown, segs, sel, k);' '                paint::selection_glow_segments(input.painter, &shown, segs, sel, k);'
+$restoreItem = @'
+    items.push(MenuItem {
+        id: "filter.vravio.photoRestore".into(),
+        label: "Реставрация старых фото…".into(),
+        path: vec!["Filter".into()],
+        shortcut: None,
+        enabled: app.session.active().is_some() && app.services.export.is_some() && app.services.write.is_some(),
+        checked: None,
+        color: None,
+    });
+'@
+Insert-Before-Once 'upstream/photocraft/crates/ui-egui/src/menus/items.rs' '    crate::plugin_ui::insert_menu_items(app, &mut items);' 'filter.vravio.photoRestore' $restoreItem
+$restoreCommand = @'
+    if id == "filter.vravio.photoRestore" {
+        let doc = app.session.active().ok_or("no document is open".to_string());
+        return Some(doc.and_then(|doc| {
+            let export = app.services.export.as_ref().ok_or("PNG export is unavailable")?;
+            let (bytes, _) = export(&doc.doc, "vravio-restoration-input.png", &crate::ExportSettings::default())?;
+            let write = app.services.write.as_ref().ok_or("browser bridge is unavailable")?;
+            write("vravio-restoration-input.png", &bytes)?;
+            Ok(json!({"sent": true}))
+        }));
+    }
+'@
+Insert-Before-Once 'upstream/photocraft/crates/ui-egui/src/menus/invoke.rs' '    if id == "help.checkForUpdates" {' 'if id == "filter.vravio.photoRestore"' $restoreCommand
+$restoreBridge = @'
+fn send_restore_input(bytes: &[u8]) -> Result<(), String> {
+    let js = |e: wasm_bindgen::JsValue| format!("{e:?}");
+    let window = web_sys::window().ok_or("no window")?;
+    let parent = js_sys::Reflect::get(window.as_ref(), &"parent".into()).map_err(js)?;
+    let post = js_sys::Reflect::get(&parent, &"postMessage".into()).map_err(js)?.dyn_into::<js_sys::Function>().map_err(|_| "no postMessage")?;
+    let message = js_sys::Object::new();
+    js_sys::Reflect::set(&message, &"type".into(), &"vravio-restorer-open".into()).map_err(js)?;
+    js_sys::Reflect::set(&message, &"bytes".into(), &js_sys::Uint8Array::from(bytes).into()).map_err(js)?;
+    post.call2(&parent, &message, &window.location().origin().map_err(js)?.into()).map_err(js)?;
+    Ok(())
+}
+
+fn listen_restore_result(inbox: Inbox, ctx: egui::Context) {
+    use wasm_bindgen::closure::Closure;
+    let Some(window) = web_sys::window() else { return };
+    let cb = Closure::<dyn FnMut(web_sys::MessageEvent)>::new(move |event| {
+        let Some(window) = web_sys::window() else { return };
+        if window.location().origin().ok().as_deref() != Some(event.origin().as_str()) { return }
+        let data = event.data();
+        if js_sys::Reflect::get(&data, &"type".into()).ok().and_then(|v| v.as_string()).as_deref() != Some("vravio-restorer-result") { return }
+        let bytes = js_sys::Uint8Array::new(&js_sys::Reflect::get(&data, &"bytes".into()).unwrap_or_default()).to_vec();
+        let name = js_sys::Reflect::get(&data, &"name".into()).ok().and_then(|v| v.as_string()).unwrap_or_else(|| "restored.png".into());
+        inbox.lock().unwrap_or_else(PoisonError::into_inner).push((name, bytes));
+        ctx.request_repaint();
+    });
+    if window.add_event_listener_with_callback("message", cb.as_ref().unchecked_ref()).is_ok() { cb.forget(); }
+}
+'@
+Insert-Before-Once 'upstream/photocraft/apps/photocraft-web/src/web.rs' '/// Trigger a browser download of `bytes` named after the last component of `path`.' 'fn send_restore_input(bytes: &[u8])' $restoreBridge
+Replace-Exact 'upstream/photocraft/apps/photocraft-web/Cargo.toml' '"BeforeUnloadEvent", "AbortController"' '"BeforeUnloadEvent", "MessageEvent", "AbortController"'
+Insert-Before-Once 'upstream/photocraft/apps/photocraft-web/src/web.rs' '                    let place_inbox: Inbox = Arc::default();' 'listen_restore_result(inbox.clone(), cc.egui_ctx.clone());' '                    listen_restore_result(inbox.clone(), cc.egui_ctx.clone());'
+Replace-Exact 'upstream/photocraft/apps/photocraft-web/src/web.rs' "fn download(path: &str, bytes: &[u8]) -> Result<(), String> {`n" "fn download(path: &str, bytes: &[u8]) -> Result<(), String> {`n    if path.ends_with(`"vravio-restoration-input.png`") { return send_restore_input(bytes); }`n"
 Replace-Exact 'upstream/filmcraft/crates/ui-egui/src/theme.rs' 'accent: Color32::from_rgb(0x2f, 0x6b, 0xdf)' 'accent: Color32::from_rgb(0xff, 0x00, 0x00)'
 Replace-Exact 'upstream/filmcraft/crates/ui-egui/src/theme.rs' 'accent_hover: Color32::from_rgb(0x3f, 0x7c, 0xe8)' 'accent_hover: Color32::from_rgb(0xff, 0x44, 0x44)'
 Replace-Exact 'upstream/photocraft/crates/ui-egui/src/lib.rs' 'assets/app-icon/hicolor/128x128/apps/ai.storyteller.photocraft.png' 'assets/vravio-icon.png'
