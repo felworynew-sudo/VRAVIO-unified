@@ -73,13 +73,13 @@ jobs:
             foreach ($name in @('LICENSE-MIT','LICENSE-APACHE','NOTICE')) {
               Copy-Item "upstream/$repo/$name" $target -Force
             }
+          }
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
       - run: npm ci
       - run: npx vite build --config restorer/vite.config.js
-          }
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist

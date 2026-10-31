@@ -109,41 +109,55 @@ $restoreItem = @'
 '@
 Insert-Before-Once 'upstream/photocraft/crates/ui-egui/src/menus/items.rs' '    crate::plugin_ui::insert_menu_items(app, &mut items);' 'filter.vravio.photoRestore' $restoreItem
 $restoreCommand = @'
-    if id == "filter.vravio.photoRestore" {
+    if id == "filter.vravio.photoRestore" || (id == "layer.removeBackground" && app.services.write_unconfirmed) {
+        let cutout = id == "layer.removeBackground";
+        let path = if cutout { "vravio-cutout-input.png" } else { "vravio-restoration-input.png" };
         let doc = app.session.active().ok_or("no document is open".to_string());
         return Some(doc.and_then(|doc| {
             let export = app.services.export.as_ref().ok_or("PNG export is unavailable")?;
-            let (bytes, _) = export(&doc.doc, "vravio-restoration-input.png", &crate::ExportSettings::default())?;
+            let (bytes, _) = export(&doc.doc, path, &crate::ExportSettings::default())?;
             let write = app.services.write.as_ref().ok_or("browser bridge is unavailable")?;
-            write("vravio-restoration-input.png", &bytes)?;
+            write(path, &bytes)?;
             Ok(json!({"sent": true}))
         }));
     }
 '@
 Insert-Before-Once 'upstream/photocraft/crates/ui-egui/src/menus/invoke.rs' '    if id == "help.checkForUpdates" {' 'if id == "filter.vravio.photoRestore"' $restoreCommand
 Replace-Exact 'upstream/photocraft/crates/ui-egui/src/menus/invoke.rs' 'let write = app.services.write.as_ref().ok_or("browser bridge is unavailable")?;' 'let write = app.services.write.as_mut().ok_or("browser bridge is unavailable")?;'
+Replace-Exact 'upstream/photocraft/crates/ui-egui/src/menus/invoke.rs' 'if id == "filter.vravio.photoRestore" {' 'if id == "filter.vravio.photoRestore" || (id == "layer.removeBackground" && app.services.write_unconfirmed) {'
+Insert-Before-Once 'upstream/photocraft/crates/ui-egui/src/menus/invoke.rs' '        let doc = app.session.active().ok_or("no document is open".to_string());' 'let cutout = id == "layer.removeBackground";' '        let cutout = id == "layer.removeBackground";'
+Insert-Before-Once 'upstream/photocraft/crates/ui-egui/src/menus/invoke.rs' '        let doc = app.session.active().ok_or("no document is open".to_string());' 'let path = if cutout' '        let path = if cutout { "vravio-cutout-input.png" } else { "vravio-restoration-input.png" };'
+Replace-Exact 'upstream/photocraft/crates/ui-egui/src/menus/invoke.rs' 'export(&doc.doc, "vravio-restoration-input.png", &crate::ExportSettings::default())?' 'export(&doc.doc, path, &crate::ExportSettings::default())?'
+Replace-Exact 'upstream/photocraft/crates/ui-egui/src/menus/invoke.rs' 'write("vravio-restoration-input.png", &bytes)?;' 'write(path, &bytes)?;'
 $restoreBridge = @'
-fn send_restore_input(bytes: &[u8]) -> Result<(), String> {
+fn send_restore_input(path: &str, bytes: &[u8]) -> Result<(), String> {
     let js = |e: wasm_bindgen::JsValue| format!("{e:?}");
     let window = web_sys::window().ok_or("no window")?;
     let parent = js_sys::Reflect::get(window.as_ref(), &"parent".into()).map_err(js)?;
     let post = js_sys::Reflect::get(&parent, &"postMessage".into()).map_err(js)?.dyn_into::<js_sys::Function>().map_err(|_| "no postMessage")?;
     let message = js_sys::Object::new();
-    js_sys::Reflect::set(&message, &"type".into(), &"vravio-restorer-open".into()).map_err(js)?;
+    let kind = if path.ends_with("vravio-cutout-input.png") { "vravio-cutout-open" } else { "vravio-restorer-open" };
+    js_sys::Reflect::set(&message, &"type".into(), &kind.into()).map_err(js)?;
     js_sys::Reflect::set(&message, &"bytes".into(), &js_sys::Uint8Array::from(bytes).into()).map_err(js)?;
     post.call2(&parent, &message, &window.location().origin().map_err(js)?.into()).map_err(js)?;
     Ok(())
 }
 
-fn listen_restore_result(inbox: Inbox, ctx: egui::Context) {
+fn listen_restore_result(inbox: Inbox, cutout_inbox: CutoutInbox, ctx: egui::Context) {
     use wasm_bindgen::closure::Closure;
     let Some(window) = web_sys::window() else { return };
     let cb = Closure::<dyn FnMut(web_sys::MessageEvent)>::new(move |event: web_sys::MessageEvent| {
         let Some(window) = web_sys::window() else { return };
         if window.location().origin().ok().as_deref() != Some(event.origin().as_str()) { return }
         let data = event.data();
-        if js_sys::Reflect::get(&data, &"type".into()).ok().and_then(|v| v.as_string()).as_deref() != Some("vravio-restorer-result") { return }
+        let kind = js_sys::Reflect::get(&data, &"type".into()).ok().and_then(|v| v.as_string());
+        if !matches!(kind.as_deref(), Some("vravio-restorer-result" | "vravio-cutout-result")) { return }
         let bytes = js_sys::Uint8Array::new(&js_sys::Reflect::get(&data, &"bytes".into()).unwrap_or_default()).to_vec();
+        if kind.as_deref() == Some("vravio-cutout-result") {
+            cutout_inbox.lock().unwrap_or_else(PoisonError::into_inner).push(bytes);
+            ctx.request_repaint();
+            return;
+        }
         let name = js_sys::Reflect::get(&data, &"name".into()).ok().and_then(|v| v.as_string()).unwrap_or_else(|| "restored.png".into());
         inbox.lock().unwrap_or_else(PoisonError::into_inner).push((name, bytes));
         ctx.request_repaint();
@@ -151,11 +165,53 @@ fn listen_restore_result(inbox: Inbox, ctx: egui::Context) {
     if window.add_event_listener_with_callback("message", cb.as_ref().unchecked_ref()).is_ok() { cb.forget(); }
 }
 '@
-Insert-Before-Once 'upstream/photocraft/apps/photocraft-web/src/web.rs' '/// Trigger a browser download of `bytes` named after the last component of `path`.' 'fn send_restore_input(bytes: &[u8])' $restoreBridge
+Insert-Before-Once 'upstream/photocraft/apps/photocraft-web/src/web.rs' '/// Trigger a browser download of `bytes` named after the last component of `path`.' 'fn send_restore_input(' $restoreBridge
+Replace-Exact 'upstream/photocraft/apps/photocraft-web/src/web.rs' 'fn listen_restore_result(inbox: Inbox, ctx: egui::Context)' 'fn listen_restore_result(inbox: Inbox, cutout_inbox: CutoutInbox, ctx: egui::Context)'
+Replace-Exact 'upstream/photocraft/apps/photocraft-web/src/web.rs' 'if js_sys::Reflect::get(&data, &"type".into()).ok().and_then(|v| v.as_string()).as_deref() != Some("vravio-restorer-result") { return }' 'let kind = js_sys::Reflect::get(&data, &"type".into()).ok().and_then(|v| v.as_string());'
+Insert-Before-Once 'upstream/photocraft/apps/photocraft-web/src/web.rs' '        let bytes = js_sys::Uint8Array::new(&js_sys::Reflect::get(&data, &"bytes".into()).unwrap_or_default()).to_vec();' 'if !matches!(kind.as_deref()' '        if !matches!(kind.as_deref(), Some("vravio-restorer-result" | "vravio-cutout-result")) { return }'
+Insert-Before-Once 'upstream/photocraft/apps/photocraft-web/src/web.rs' '        let name = js_sys::Reflect::get(&data, &"name".into())' 'cutout_inbox.lock().unwrap_or_else' "        if kind.as_deref() == Some(`"vravio-cutout-result`") {`n            cutout_inbox.lock().unwrap_or_else(PoisonError::into_inner).push(bytes);`n            ctx.request_repaint();`n            return;`n        }"
+Replace-Exact 'upstream/photocraft/apps/photocraft-web/src/web.rs' "type Inbox = Arc<Mutex<Vec<(String, Vec<u8>)>>>;`n`n" "type Inbox = Arc<Mutex<Vec<(String, Vec<u8>)>>>;`ntype CutoutInbox = Arc<Mutex<Vec<Vec<u8>>>>;`n`n"
+Replace-Exact 'upstream/photocraft/apps/photocraft-web/src/web.rs' 'WebShell { app, inbox, place_inbox, unsaved' 'WebShell { app, inbox, cutout_inbox, place_inbox, unsaved'
+Insert-Before-Once 'upstream/photocraft/apps/photocraft-web/src/web.rs' '    /// Dropped files to place on the active document' '    cutout_inbox: CutoutInbox,' '    cutout_inbox: CutoutInbox,'
+$applyAiMask = @'
+fn apply_ai_cutout(app: &mut PhotocraftApp, bytes: &[u8]) -> Result<(), String> {
+    let imported = photocraft_io::import("ai-cutout.png", bytes).map_err(|e| e.to_string())?.document;
+    let alpha = imported.layers.first().and_then(|layer| layer.surface()).ok_or("AI result has no pixels")?;
+    if alpha.channels() < 4 { return Err("AI result has no alpha channel".into()); }
+    let bounds = imported.bounds();
+    let width = bounds.width() as i32;
+    let height = bounds.height() as i32;
+    app.session.edit("AI Remove Background", |doc, active| {
+        if doc.bounds() != bounds { return Err(photocraft_engine::EngineError::Other("document size changed during AI cutout".into())); }
+        let id = (*active).ok_or(photocraft_engine::EngineError::NoDocument)?;
+        let background = doc.is_background(id);
+        let layer = doc.layer_mut(id).ok_or(photocraft_engine::EngineError::NoLayer(id))?;
+        if background {
+            layer.locks.transparency = false;
+            layer.locks.position = false;
+            layer.name = "Layer 0".into();
+        }
+        let mut mask = photocraft_doc::LayerMask::hide_all();
+        let mut row = vec![0.0f32; width as usize];
+        for y in 0..height {
+            for x in 0..width { row[x as usize] = alpha.sample_channel(x, y, 3); }
+            mask.surface.write_region(photocraft_geom::Rect::new(0, y, width, y + 1), &row);
+        }
+        layer.mask = Some(mask);
+        doc.selection = None;
+        Ok(())
+    }).map_err(|e| e.to_string())
+}
+'@
+Insert-Before-Once 'upstream/photocraft/apps/photocraft-web/src/web.rs' 'fn send_restore_input' 'fn apply_ai_cutout(app:' $applyAiMask
+Insert-Before-Once 'upstream/photocraft/apps/photocraft-web/src/web.rs' '        self.serve_fonts(ctx);' 'std::mem::take(&mut *self.cutout_inbox' "        let masks = std::mem::take(&mut *self.cutout_inbox.lock().unwrap_or_else(PoisonError::into_inner));`n        for bytes in masks {`n            if let Err(error) = apply_ai_cutout(&mut self.app, &bytes) { self.app.ui.status = format!(`"AI cutout failed: {error}`"); }`n        }"
+Replace-Exact 'upstream/photocraft/apps/photocraft-web/Cargo.toml' "photocraft-doc = { workspace = true }`nphotocraft-ui-egui" "photocraft-doc = { workspace = true }`nphotocraft-geom = { workspace = true }`nphotocraft-ui-egui"
+Replace-Exact 'upstream/photocraft/apps/photocraft-web/src/web.rs' 'fn send_restore_input(bytes: &[u8])' 'fn send_restore_input(path: &str, bytes: &[u8])'
+Replace-Exact 'upstream/photocraft/apps/photocraft-web/src/web.rs' 'js_sys::Reflect::set(&message, &"type".into(), &"vravio-restorer-open".into()).map_err(js)?;' "    let kind = if path.ends_with(`"vravio-cutout-input.png`") { `"vravio-cutout-open`" } else { `"vravio-restorer-open`" };`n    js_sys::Reflect::set(&message, &`"type`".into(), &kind.into()).map_err(js)?;"
 Replace-Exact 'upstream/photocraft/apps/photocraft-web/src/web.rs' 'move |event| {' 'move |event: web_sys::MessageEvent| {'
 Replace-Exact 'upstream/photocraft/apps/photocraft-web/Cargo.toml' '"BeforeUnloadEvent", "AbortController"' '"BeforeUnloadEvent", "MessageEvent", "AbortController"'
-Insert-Before-Once 'upstream/photocraft/apps/photocraft-web/src/web.rs' '                    let place_inbox: Inbox = Arc::default();' 'listen_restore_result(inbox.clone(), cc.egui_ctx.clone());' '                    listen_restore_result(inbox.clone(), cc.egui_ctx.clone());'
-Replace-Exact 'upstream/photocraft/apps/photocraft-web/src/web.rs' "fn download(path: &str, bytes: &[u8]) -> Result<(), String> {`n" "fn download(path: &str, bytes: &[u8]) -> Result<(), String> {`n    if path.ends_with(`"vravio-restoration-input.png`") { return send_restore_input(bytes); }`n"
+Insert-Before-Once 'upstream/photocraft/apps/photocraft-web/src/web.rs' '                    let place_inbox: Inbox = Arc::default();' 'listen_restore_result(inbox.clone(),' "                    let cutout_inbox: CutoutInbox = Arc::default();`n                    listen_restore_result(inbox.clone(), cutout_inbox.clone(), cc.egui_ctx.clone());"
+Replace-Exact 'upstream/photocraft/apps/photocraft-web/src/web.rs' "fn download(path: &str, bytes: &[u8]) -> Result<(), String> {`n    let js =" "fn download(path: &str, bytes: &[u8]) -> Result<(), String> {`n    if path.ends_with(`"vravio-restoration-input.png`") || path.ends_with(`"vravio-cutout-input.png`") { return send_restore_input(path, bytes); }`n    let js ="
 Replace-Exact 'upstream/filmcraft/crates/ui-egui/src/theme.rs' 'accent: Color32::from_rgb(0x2f, 0x6b, 0xdf)' 'accent: Color32::from_rgb(0xff, 0x00, 0x00)'
 Replace-Exact 'upstream/filmcraft/crates/ui-egui/src/theme.rs' 'accent_hover: Color32::from_rgb(0x3f, 0x7c, 0xe8)' 'accent_hover: Color32::from_rgb(0xff, 0x44, 0x44)'
 Replace-Exact 'upstream/photocraft/crates/ui-egui/src/lib.rs' 'assets/app-icon/hicolor/128x128/apps/ai.storyteller.photocraft.png' 'assets/vravio-icon.png'

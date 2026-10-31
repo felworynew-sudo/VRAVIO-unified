@@ -135,20 +135,21 @@ document.addEventListener('keydown', event => {
 window.addEventListener('message', event => {
   if (event.origin !== location.origin) return;
   const message = event.data;
-  if (message?.type === 'vravio-restorer-open') {
+  if (message?.type === 'vravio-restorer-open' || message?.type === 'vravio-cutout-open') {
     const raster = tabs.find(t => t.kind === 'raster');
     if (!raster || frames.get(raster.id)?.contentWindow !== event.source) return;
     restorerSource = event.source;
     const root = document.querySelector('#restorer-root');
-    root.innerHTML = '<div class="restore-scrim"><iframe title="Реставрация старых фото"></iframe></div>';
+    const cutout = message.type === 'vravio-cutout-open';
+    root.innerHTML = `<div class="restore-scrim"><iframe title="${cutout ? 'Удалить фон' : 'Реставрация старых фото'}"></iframe></div>`;
     const frame = root.querySelector('iframe');
-    frame.onload = () => frame.contentWindow.postMessage({ type: 'vravio-restorer-input', bytes: message.bytes, name: 'photo.png' }, location.origin);
-    frame.src = local('restorer/');
+    frame.onload = () => frame.contentWindow.postMessage({ type: cutout ? 'vravio-cutout-input' : 'vravio-restorer-input', bytes: message.bytes, name: 'photo.png' }, location.origin);
+    frame.src = local(cutout ? 'restorer/cutout/' : 'restorer/');
   }
-  if (message?.type === 'vravio-restorer-close' || message?.type === 'vravio-restorer-result') {
+  if (['vravio-restorer-close', 'vravio-restorer-result', 'vravio-cutout-close', 'vravio-cutout-result'].includes(message?.type)) {
     const frame = document.querySelector('#restorer-root iframe');
     if (frame?.contentWindow !== event.source) return;
-    if (message.type === 'vravio-restorer-result') restorerSource?.postMessage(message, location.origin);
+    if (message.type === 'vravio-restorer-result' || message.type === 'vravio-cutout-result') restorerSource?.postMessage(message, location.origin);
     document.querySelector('#restorer-root').replaceChildren();
     restorerSource = null;
   }
