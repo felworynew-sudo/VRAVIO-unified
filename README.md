@@ -1,6 +1,6 @@
 # VRAVIO
 
-One workspace for raster, vector, audio and video editing. A document tab chooses an environment, and tabs from different environments can remain open together. The shell uses VRAVIO branding, icons and accent colors. Each editor currently runs in its own embedded web frame so its engine and tools remain upstream code.
+One workspace for raster, vector, audio and video editing. A compact strip switches between the four environments; each environment keeps its own document tabs and editing state. The shell uses VRAVIO branding, icons and accent colors. Each editor currently runs in its own embedded web frame so its engine and tools remain upstream code.
 
 ## Build
 
@@ -22,6 +22,6 @@ The launcher alone can be built quickly with `.\build-web.ps1 -ShellOnly`, thoug
 
 ## Current integration boundary
 
-Each environment gets one live editor frame. The launcher preserves it while changing tabs, mirrors the active document title where the editor exposes one, and restores the tab list after restart; the editors retain their own document persistence, internal document tabs and file formats. Opening an environment already in the shell selects that frame. Closing a tab unloads its editor after a save reminder. Cross-environment copy/paste, one shared document model, simultaneous shell tabs for multiple documents of the same environment, and a shell-level unsaved-changes check are not implemented yet. The build-time branding pass changes the main UI labels, accent tokens and visible community links; engine diagnostics and less common screens still need a branding audit.
+Each environment gets one live editor frame. The launcher preserves it while changing environments and restores the environment strip after restart; the editors retain their own document persistence, internal document tabs and file formats. Opening an environment already in the shell selects that frame. Closing an environment unloads its editor after a save reminder. A single cross-environment document tab strip, cross-environment copy/paste, one shared document model, and a shell-level unsaved-changes check are not implemented yet. The build-time branding pass changes the main UI labels, accent tokens and visible community links; engine diagnostics and less common screens still need a branding audit.
 
 The four sources are Git submodules pinned to specific commits. Their MIT/Apache-2.0 license texts and notices are copied into `dist/third-party-notices/` for distribution. VRAVIO's launcher is separate code; `brand-editors.ps1` makes UI-only changes in the local build checkout without changing the pinned upstream commits.
