@@ -12,6 +12,8 @@ let activeId = null;
 let nextId = 1;
 let chooserOpen = false;
 let restorerSource = null;
+let restoreCleanup = null;
+let restoreGeneration = 0;
 const bridgeToken = location.hash.match(/^#bridge=([a-f0-9]{32})$/)?.[1] || null;
 const bridge = bridgeToken && window.opener ? { token: bridgeToken, opener: window.opener, origin: null, payload: null, rasterReady: false, sent: false } : null;
 const app = document.querySelector('#app');
@@ -145,10 +147,25 @@ function render() {
 const frames = new Map();
 function showChooser() { chooserOpen = true; render(); }
 function hideChooser() { chooserOpen = false; render(); }
+function closeRestorer() {
+  restoreGeneration++;
+  restoreCleanup?.();
+  restoreCleanup = null;
+  document.querySelector('#restorer-root')?.replaceChildren();
+  restorerSource = null;
+}
 document.addEventListener('keydown', event => {
+  if (event.key === 'Escape' && document.querySelector('#restorer-root .restore-scrim')) {
+    event.preventDefault(); closeRestorer(); return;
+  }
   if (event.key === 'Escape' && chooserOpen) { hideChooser(); return; }
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'n') { event.preventDefault(); showChooser(); }
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'w' && activeId !== null && !chooserOpen) { event.preventDefault(); closeTab(activeId); }
+});
+window.addEventListener('beforeunload', event => {
+  if (!tabs.length) return;
+  event.preventDefault();
+  event.returnValue = '';
 });
 window.addEventListener('message', event => {
   const message = event.data;
@@ -181,17 +198,37 @@ window.addEventListener('message', event => {
     restorerSource = event.source;
     const root = document.querySelector('#restorer-root');
     const cutout = message.type === 'vravio-cutout-open';
-    root.innerHTML = `<div class="restore-scrim"><iframe title="${cutout ? 'Удалить фон' : 'Реставрация старых фото'}"></iframe></div>`;
-    const frame = root.querySelector('iframe');
-    frame.onload = () => frame.contentWindow.postMessage({ type: cutout ? 'vravio-cutout-input' : 'vravio-restorer-input', bytes: message.bytes, name: 'photo.png' }, location.origin);
-    frame.src = local(cutout ? 'restorer/cutout/' : 'restorer/');
+    closeRestorer();
+    restorerSource = event.source;
+    const generation = restoreGeneration;
+    root.innerHTML = `<div class="restore-scrim"><button class="restore-dismiss" aria-label="Закрыть окно" title="Закрыть">×</button>${cutout ? '<iframe title="Удалить фон"></iframe>' : `<div id="restore-app" data-base="${local('restorer/')}"><div class="restore-loading">Открываем реставрацию…</div></div>`}</div>`;
+    root.querySelector('.restore-dismiss').onclick = closeRestorer;
+    root.querySelector('.restore-scrim').addEventListener('click', e => { if (e.target.classList.contains('restore-scrim')) closeRestorer(); });
+    if (cutout) {
+      const frame = root.querySelector('iframe');
+      frame.onload = () => frame.contentWindow.postMessage({ type: 'vravio-cutout-input', bytes: message.bytes, name: 'photo.png' }, location.origin);
+      frame.src = local('restorer/cutout/');
+    } else {
+      import(local('restorer/embedded.js')).then(() => {
+        if (generation !== restoreGeneration) return;
+        restoreCleanup = window.__vravioMountRestorer(root.querySelector('#restore-app'), {
+          bytes: message.bytes, name: 'photo.png', onClose: closeRestorer,
+          onResult: ({ bytes, original, mode, name }) => {
+            restorerSource?.postMessage({ type: 'vravio-restorer-result', bytes, original, mode, name }, location.origin, [bytes, original]);
+            closeRestorer();
+          },
+        });
+      }).catch(error => {
+        if (generation === restoreGeneration) root.querySelector('#restore-app').textContent = `Не удалось открыть реставрацию: ${error.message}`;
+      });
+    }
+    return;
   }
   if (['vravio-restorer-close', 'vravio-restorer-result', 'vravio-cutout-close', 'vravio-cutout-result'].includes(message?.type)) {
     const frame = document.querySelector('#restorer-root iframe');
     if (frame?.contentWindow !== event.source) return;
     if (message.type === 'vravio-restorer-result' || message.type === 'vravio-cutout-result') restorerSource?.postMessage(message, location.origin);
-    document.querySelector('#restorer-root').replaceChildren();
-    restorerSource = null;
+    closeRestorer();
   }
 });
 load();

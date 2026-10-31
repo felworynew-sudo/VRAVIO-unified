@@ -1,5 +1,5 @@
 import { cutOut } from './utils/cutout.js';
-import './style.css';
+import './cutout.css';
 
 const app = document.querySelector('#cutout-app');
 let source = null, result = null, name = 'photo.png', busy = false, webgpu = false;

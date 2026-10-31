@@ -37,3 +37,5 @@ button { font: inherit; color: inherit; cursor: pointer; }
 @media(max-width: 620px) { .choices { grid-template-columns: repeat(2, 1fr); } .tab { flex-basis: 145px; } }
 .restore-scrim { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; padding: 24px; background: #050506ce; }
 .restore-scrim iframe { width: min(1000px, 100%); height: min(740px, 100%); border: 1px solid #45454a; border-radius: 9px; background: #141415; box-shadow: 0 24px 80px #000c; }
+.restore-dismiss { position: absolute; top: 8px; right: 10px; z-index: 2; border: 0; background: #29292c; border-radius: 6px; color: #ececf0; font-size: 24px; width: 38px; height: 38px; }
+.restore-loading { padding: 28px; background: #1d1d1f; border-radius: 8px; }

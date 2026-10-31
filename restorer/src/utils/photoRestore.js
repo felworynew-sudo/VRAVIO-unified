@@ -12,7 +12,7 @@ import {
   tileApply, rgbToLab, labToRgb, matchColor, isGrayscale,
 } from './restoreMath';
 
-const BASE = `${import.meta.env.BASE_URL || '/'}models/restore/`;
+const BASE = new URL('models/restore/', document.querySelector('#restore-app')?.dataset.base || document.baseURI).href;
 const HF = 'https://huggingface.co/facefusion/models-3.0.0/resolve/main/';
 
 export { releaseAll };
