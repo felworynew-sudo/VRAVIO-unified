@@ -318,8 +318,8 @@ $vravioSaveDialog = @'
 Replace-Exact 'upstream/photocraft/apps/photocraft-web/src/web.rs' $webSaveDialog $vravioSaveDialog
 Replace-Exact 'upstream/vectorcraft/crates/ui-egui/src/canvas/home.rs' '    ui.label(egui::RichText::new(tl!("Community")).font(theme::semibold(14.0)).color(t.text));' ''
 $audioAppMenu = @'
-                ui.menu_button("VRAVIO", |ui| {
-                    if ui.button("About VRAVIO").clicked() {
+                ui.menu_button("SoundCraft", |ui| {
+                    if ui.button("About SoundCraft").clicked() {
                         app.ui.show_about = true;
                     }
                     if ui.button("Check for Updates…").clicked() {
@@ -338,7 +338,6 @@ $audioAppMenu = @'
                 });
 '@
 Replace-Exact 'upstream/soundcraft/crates/ui-egui/src/menus.rs' $audioAppMenu ''
-Replace-Exact 'upstream/soundcraft/crates/ui-egui/src/menus.rs' "    for (path, _) in MENU_WINDOWS {`n        insert_path(&mut roots, path);`n    }`n    roots" "    for (path, _) in MENU_WINDOWS {`n        insert_path(&mut roots, path);`n    }`n    roots.retain(|node| node.label != `"VRAVIO`");`n    roots"
 Replace-Exact 'upstream/photocraft/crates/ui-egui/src/lib.rs' 'assets/app-icon/hicolor/128x128/apps/ai.storyteller.photocraft.png' 'assets/vravio-icon.png'
 Replace-Exact 'upstream/photocraft/crates/ui-egui/src/panels/brand.rs' 'assets/app-icon/hicolor/128x128/apps/ai.storyteller.photocraft.png' 'assets/vravio-icon.png'
 Replace-Exact 'upstream/vectorcraft/crates/ui-egui/src/lib.rs' 'assets/app-icon/hicolor/128x128/apps/ai.storyteller.vectorcraft.png' 'assets/vravio-icon.png'
