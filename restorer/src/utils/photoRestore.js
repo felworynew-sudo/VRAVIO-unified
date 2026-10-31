@@ -257,7 +257,7 @@ export async function restoreClassic(srcCanvas, opts, hooks = {}) {
 // ---------- режим «Vetor Restore» ----------
 
 export const VETOR_STAGES = ['texture', 'repair', 'inpaint', 'faces', 'colorize'];
-export const VETOR_MANIFEST_URL = `${BASE}vetor-restore.json`;
+export const VETOR_MANIFEST_URL = `${BASE}vetor-restore.json?bundle=2026-11-01`;
 
 // Манифест: { status: 'training'|'ready', note, base, nets: { texture|repair|faces|colorize: { file, mb } } }
 export async function loadVetorManifest(url = VETOR_MANIFEST_URL) {

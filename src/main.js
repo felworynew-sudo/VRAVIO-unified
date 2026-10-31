@@ -3,7 +3,7 @@ const local = path => new URL(path, root).href;
 const environments = {
   raster: { name: 'Растр', icon: local('assets/raster.svg'), color: '#a100ff', path: local('editors/raster/') },
   vector: { name: 'Вектор', icon: local('assets/vector.svg'), color: '#0068ff', path: local('editors/vector/') },
-  audio: { name: 'Аудио', icon: local('assets/audio.svg'), color: '#ffb600', path: local('editors/audio/') },
+  audio: { name: 'Аудио', icon: local('assets/audio.svg'), color: '#ffb600', path: `${local('editors/audio/')}?empty` },
   video: { name: 'Видео', icon: local('assets/video.svg'), color: '#ff0000', path: `${local('editors/video/')}?empty` }
 };
 const storageKey = 'vravio-unified-workspace-v1';

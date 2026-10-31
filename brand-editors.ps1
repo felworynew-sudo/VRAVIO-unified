@@ -9,11 +9,17 @@ Copy-Item (Join-Path $root 'assets/wordmark-black.png') (Join-Path $root 'upstre
 
 function Replace-Exact([string]$relative, [string]$old, [string]$new) {
   $file = Join-Path $root $relative
+  $old = $old.Replace("`r`n", "`n")
+  $new = $new.Replace("`r`n", "`n")
   $text = [IO.File]::ReadAllText($file).Replace("`r`n", "`n")
+  if ($new -ne '' -and $new.Contains($old) -and $text.Contains($new)) { return }
   if (-not $text.Contains($old) -and -not $text.Contains($new)) { throw "Branding anchor changed: $relative [$old]" }
   if ($new -eq '') {
-    $line = [regex]::Escape($old.Trim())
-    $next = [regex]::Replace($text, "(?m)^[ \t]*$line[ \t]*\n", '')
+    if ($old.Contains("`n")) { $next = $text.Replace($old, '') }
+    else {
+      $line = [regex]::Escape($old.Trim())
+      $next = [regex]::Replace($text, "(?m)^[ \t]*$line[ \t]*\n", '')
+    }
   } else {
     $next = $text.Replace($old, $new)
   }
@@ -288,6 +294,30 @@ Insert-After-Once 'upstream/photocraft/apps/photocraft-web/src/web.rs' 'fn downl
 Insert-After-Once 'upstream/photocraft/apps/photocraft-web/src/web.rs' 'fn download(path: &str, bytes: &[u8]) -> Result<(), String> {' 'return send_bridge_result(path, bytes);' '    if path.starts_with("vravio-bridge-result-") && path.ends_with(".png") { return send_bridge_result(path, bytes); }'
 Replace-Exact 'upstream/filmcraft/crates/ui-egui/src/theme.rs' 'accent: Color32::from_rgb(0x2f, 0x6b, 0xdf)' 'accent: Color32::from_rgb(0xff, 0x00, 0x00)'
 Replace-Exact 'upstream/filmcraft/crates/ui-egui/src/theme.rs' 'accent_hover: Color32::from_rgb(0x3f, 0x7c, 0xe8)' 'accent_hover: Color32::from_rgb(0xff, 0x44, 0x44)'
+Replace-Exact 'upstream/vectorcraft/crates/ui-egui/src/state.rs' 'brightness: Brightness::MediumDark,' 'brightness: Brightness::Dark,'
+Replace-Exact 'upstream/photocraft/crates/ui-egui/src/file_open.rs' '    pub(crate) fn place_bytes(&mut self, name: &str, bytes: Vec<u8>, linked: Option<String>)' '    pub fn place_bytes(&mut self, name: &str, bytes: Vec<u8>, linked: Option<String>)'
+Replace-Exact 'upstream/vectorcraft/crates/ui-egui/src/canvas/home.rs' '    ui.label(egui::RichText::new(tl!("Community")).font(theme::semibold(14.0)).color(t.text));' ''
+$audioAppMenu = @'
+                ui.menu_button("VRAVIO", |ui| {
+                    if ui.button("About VRAVIO").clicked() {
+                        app.ui.show_about = true;
+                    }
+                    if ui.button("Check for Updates…").clicked() {
+                        let _ = app.run("app.checkForUpdates", json!({}));
+                    }
+                    if ui.button("Session Info").clicked() {
+                        app.ui.show_session_info = true;
+                    }
+                    if ui.button("Session Audio Health").clicked() {
+                        let _ = app.run("window.audio_health", json!({"value": true}));
+                    }
+                    ui.separator();
+                    if ui.button("Quit").clicked() {
+                        let _ = crate::dialogs::run_or_ask(app, "app.quit", json!({}));
+                    }
+                });
+'@
+Replace-Exact 'upstream/soundcraft/crates/ui-egui/src/menus.rs' $audioAppMenu ''
 Replace-Exact 'upstream/photocraft/crates/ui-egui/src/lib.rs' 'assets/app-icon/hicolor/128x128/apps/ai.storyteller.photocraft.png' 'assets/vravio-icon.png'
 Replace-Exact 'upstream/photocraft/crates/ui-egui/src/panels/brand.rs' 'assets/app-icon/hicolor/128x128/apps/ai.storyteller.photocraft.png' 'assets/vravio-icon.png'
 Replace-Exact 'upstream/vectorcraft/crates/ui-egui/src/lib.rs' 'assets/app-icon/hicolor/128x128/apps/ai.storyteller.vectorcraft.png' 'assets/vravio-icon.png'
