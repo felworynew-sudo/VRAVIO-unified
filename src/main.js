@@ -126,6 +126,14 @@ function render() {
             if (!link || link.hasAttribute('download') || link.href.startsWith('blob:')) return;
             if (new URL(link.href).origin !== window.location.origin) event.preventDefault();
           }, true);
+          // Keep editor shortcuts inside the app. Browsers otherwise claim
+          // Ctrl+N/O/S/W before the canvas-based editors can handle them.
+          child.document.addEventListener('keydown', event => {
+            if ((event.ctrlKey || event.metaKey) && ['n', 'o', 's', 'w'].includes(event.key.toLowerCase())) {
+              event.preventDefault();
+            }
+          }, true);
+          if (tab.id === activeId) child.focus();
         } catch { /* A future cross-origin editor remains usable without this guard. */ }
       });
       frames.set(tab.id, iframe);
@@ -143,6 +151,7 @@ function render() {
     el.onclick = () => selectTab(Number(el.dataset.select));
   });
   app.querySelectorAll('[data-close]').forEach(el => el.onclick = () => closeTab(Number(el.dataset.close)));
+  if (active && !chooserOpen) frames.get(active.id)?.contentWindow?.focus();
 }
 const frames = new Map();
 function showChooser() { chooserOpen = true; render(); }

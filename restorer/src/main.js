@@ -36,7 +36,17 @@ export function mountRestorer(app, { bytes, name = 'photo.png', onClose, onResul
     for (const [id, mode] of [['new-doc', 'new'], ['current-doc', 'current']]) {
       app.querySelector(`#${id}`)?.addEventListener('click', async () => {
         const output = await (await fetch(result)).arrayBuffer();
-        const original = await (await fetch(source)).arrayBuffer();
+        // File picker accepts JPEG/WebP too, while the editor bridge imports PNG.
+        const originalImage = new Image();
+        originalImage.src = source;
+        await originalImage.decode();
+        const originalCanvas = document.createElement('canvas');
+        originalCanvas.width = originalImage.naturalWidth;
+        originalCanvas.height = originalImage.naturalHeight;
+        originalCanvas.getContext('2d').drawImage(originalImage, 0, 0);
+        const originalBlob = await new Promise(resolve => originalCanvas.toBlob(resolve, 'image/png'));
+        if (!originalBlob) { updateStatus('Не удалось подготовить исходное фото'); return; }
+        const original = await originalBlob.arrayBuffer();
         onResult?.({ bytes: output, original, mode, name: `restored-${fileName.replace(/\.[^.]*$/, '')}.png` });
       });
     }
