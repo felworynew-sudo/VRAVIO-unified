@@ -20,6 +20,14 @@ function Replace-Exact([string]$relative, [string]$old, [string]$new) {
   if ($next -ne $text) { [IO.File]::WriteAllText($file, $next, [Text.UTF8Encoding]::new($false)) }
 }
 
+function Insert-Before-Once([string]$relative, [string]$anchor, [string]$marker, [string]$snippet) {
+  $file = Join-Path $root $relative
+  $source = [IO.File]::ReadAllText($file).Replace("`r`n", "`n")
+  if ($source.Contains($marker)) { return }
+  if (-not $source.Contains($anchor)) { throw "Missing insertion anchor: $relative" }
+  [IO.File]::WriteAllText($file, $source.Replace($anchor, "$snippet`n$anchor"), [Text.UTF8Encoding]::new($false))
+}
+
 # Only UI color tokens are adjusted. Engines and document formats remain pinned upstream.
 Replace-Exact 'upstream/photocraft/crates/ui-egui/src/theme.rs' 'accent: Color32::from_rgb(139, 124, 246)' 'accent: Color32::from_rgb(161, 0, 255)'
 Replace-Exact 'upstream/photocraft/crates/ui-egui/src/theme.rs' "    #[default]`n    ProMedium," "    ProMedium,"
@@ -27,12 +35,67 @@ Replace-Exact 'upstream/photocraft/crates/ui-egui/src/theme.rs' "    Studio,`n  
 Replace-Exact 'upstream/photocraft/crates/engine/src/prefs.rs' 'default ProMedium);' 'default Studio);'
 Replace-Exact 'upstream/photocraft/crates/engine/src/prefs.rs' 'theme: Theme::ProMedium,' 'theme: Theme::Studio,'
 Replace-Exact 'upstream/photocraft/crates/engine/src/prefs.rs' 'dark_theme: DarkTheme::ProMedium,' 'dark_theme: DarkTheme::Studio,'
+Replace-Exact 'upstream/photocraft/apps/photocraft-web/src/web.rs' 'PhotocraftApp::setup_context(&cc.egui_ctx, ThemeKind::Pro);' 'PhotocraftApp::setup_context(&cc.egui_ctx, ThemeKind::Studio);'
+Replace-Exact 'upstream/photocraft/apps/photocraft-web/src/web.rs' 'app.set_theme(&cc.egui_ctx, ThemeKind::Pro);' 'app.set_theme(&cc.egui_ctx, ThemeKind::Studio);'
+# Give the four embedded editors the same neutral dark surfaces. Their tools and
+# environment-specific accent colours remain upstream-defined.
+Replace-Exact 'upstream/photocraft/crates/ui-egui/src/theme.rs' 'dock: Color32::from_rgb(17, 17, 18),' 'dock: Color32::from_rgb(29, 29, 31),'
+Replace-Exact 'upstream/vectorcraft/crates/ui-egui/src/theme.rs' 'app_bar: hex(0x0b0d12),' 'app_bar: hex(0x141415),'
+Replace-Exact 'upstream/vectorcraft/crates/ui-egui/src/theme.rs' 'panel: hex(0x181b22),' 'panel: hex(0x1d1d1f),'
+Replace-Exact 'upstream/vectorcraft/crates/ui-egui/src/theme.rs' 'panel_darker: hex(0x13161c),' 'panel_darker: hex(0x141415),'
+Replace-Exact 'upstream/vectorcraft/crates/ui-egui/src/theme.rs' 'pasteboard: hex(0x101217),' 'pasteboard: hex(0x0e0e0f),'
+Replace-Exact 'upstream/soundcraft/crates/ui-egui/src/theme.rs' 'window_bg: Color32::from_rgb(30, 30, 30),' 'window_bg: Color32::from_rgb(20, 20, 21),'
+Replace-Exact 'upstream/soundcraft/crates/ui-egui/src/theme.rs' 'panel_bg: Color32::from_rgb(37, 37, 38),' 'panel_bg: Color32::from_rgb(29, 29, 31),'
+Replace-Exact 'upstream/soundcraft/crates/ui-egui/src/theme.rs' 'toolbar_bg: Color32::from_rgb(30, 30, 31),' 'toolbar_bg: Color32::from_rgb(20, 20, 21),'
+Replace-Exact 'upstream/filmcraft/crates/ui-egui/src/theme.rs' 'app_bg: Color32::from_rgb(0, 0, 0),' 'app_bg: Color32::from_rgb(14, 14, 15),'
+Replace-Exact 'upstream/filmcraft/crates/ui-egui/src/theme.rs' 'header_bg: Color32::from_rgb(0x1d, 0x1d, 0x1d),' 'header_bg: Color32::from_rgb(0x14, 0x14, 0x15),'
+Replace-Exact 'upstream/filmcraft/crates/ui-egui/src/theme.rs' 'panel_bg: Color32::from_rgb(0x1d, 0x1d, 0x1d),' 'panel_bg: Color32::from_rgb(0x1d, 0x1d, 0x1f),'
+Replace-Exact 'upstream/filmcraft/crates/ui-egui/src/theme.rs' 'tab_bg: Color32::from_rgb(0x1d, 0x1d, 0x1d),' 'tab_bg: Color32::from_rgb(0x1d, 0x1d, 0x1f),'
 Replace-Exact 'upstream/vectorcraft/crates/ui-egui/src/theme.rs' "    #[default]`n    Coral,`n    Blue," "    Coral,`n    #[default]`n    Blue,"
 Replace-Exact 'upstream/vectorcraft/crates/ui-egui/src/theme.rs' '(0x5b96ff, 0x2f74f0)' '(0x0068ff, 0x005ce6)'
 Replace-Exact 'upstream/vectorcraft/crates/ui-egui/src/theme.rs' '(0x2563eb, 0x1f5ad6)' '(0x0068ff, 0x005ce6)'
 Replace-Exact 'upstream/vectorcraft/crates/engine/src/prefs.rs' 'ui_accent: s("coral"),' 'ui_accent: s("blue"),'
 Replace-Exact 'upstream/soundcraft/crates/ui-egui/src/theme.rs' 'accent: Color32::from_rgb(64, 132, 196)' 'accent: Color32::from_rgb(255, 182, 0)'
 Replace-Exact 'upstream/soundcraft/crates/ui-egui/src/theme.rs' 'accent: Color32::from_rgb(62, 116, 180)' 'accent: Color32::from_rgb(255, 182, 0)'
+
+# A soft selection glow stays inside the mask. Limit its line count so intricate masks keep
+# PhotoCraft's fast marching-ants path and do not stall the editor.
+$glow = @'
+/// A subtle white glow inside the selected pixels, measured in screen pixels.
+pub(super) fn selection_glow_segments(painter: &egui::Painter, xf: &ViewXform, segs: &[crate::outline::Segment], mask: &photocraft_raster::Surface, mask_scale: u32) {
+    if segs.len() > 4096 { return; }
+    let k = mask_scale.max(1) as i32;
+    let ppp = painter.pixels_per_point();
+    for (a, b) in segs {
+        let mx = (i64::from(a[0]) + i64::from(b[0])).div_euclid(2) as i32;
+        let my = (i64::from(a[1]) + i64::from(b[1])).div_euclid(2) as i32;
+        let (minus, plus, nx, ny) = if a[1] == b[1] {
+            let x = mx.div_euclid(k);
+            let y = a[1].div_euclid(k);
+            (mask.sample_channel(x, y - 1, 0), mask.sample_channel(x, y, 0), 0.0, 1.0)
+        } else if a[0] == b[0] {
+            let x = a[0].div_euclid(k);
+            let y = my.div_euclid(k);
+            (mask.sample_channel(x - 1, y, 0), mask.sample_channel(x, y, 0), 1.0, 0.0)
+        } else { continue };
+        if (minus > 0.5) == (plus > 0.5) { continue; }
+        let sign = if plus > 0.5 { 1.0 } else { -1.0 };
+        let centre = xf.to_screen(mx as f32, my as f32);
+        let toward = xf.to_screen(mx as f32 + nx * sign, my as f32 + ny * sign) - centre;
+        let length = toward.length();
+        if length < 1e-4 { continue; }
+        let unit = toward / length;
+        let start = xf.to_screen(a[0] as f32, a[1] as f32);
+        let end = xf.to_screen(b[0] as f32, b[1] as f32);
+        for (offset, width, alpha) in [(2.0, 3.0, 42), (4.0, 4.0, 20), (6.0, 4.0, 8)] {
+            let delta = unit * (offset / ppp);
+            painter.line_segment([start + delta, end + delta], egui::Stroke::new(width / ppp, Color32::from_rgba_unmultiplied(255, 255, 255, alpha)));
+        }
+    }
+}
+'@
+Insert-Before-Once 'upstream/photocraft/crates/ui-egui/src/canvas/paint.rs' '/// Draw boundary segments as marching ants:' 'pub(super) fn selection_glow_segments' $glow
+Insert-Before-Once 'upstream/photocraft/crates/ui-egui/src/canvas.rs' '                marching_ants_segments(input.painter, &shown, segs, time);' 'paint::selection_glow_segments(input.painter, &shown, segs, sel, k);' '                paint::selection_glow_segments(input.painter, &shown, segs, sel, k);'
 Replace-Exact 'upstream/filmcraft/crates/ui-egui/src/theme.rs' 'accent: Color32::from_rgb(0x2f, 0x6b, 0xdf)' 'accent: Color32::from_rgb(0xff, 0x00, 0x00)'
 Replace-Exact 'upstream/filmcraft/crates/ui-egui/src/theme.rs' 'accent_hover: Color32::from_rgb(0x3f, 0x7c, 0xe8)' 'accent_hover: Color32::from_rgb(0xff, 0x44, 0x44)'
 Replace-Exact 'upstream/photocraft/crates/ui-egui/src/lib.rs' 'assets/app-icon/hicolor/128x128/apps/ai.storyteller.photocraft.png' 'assets/vravio-icon.png'
