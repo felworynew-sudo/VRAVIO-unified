@@ -456,8 +456,8 @@ function render() {
       frames.set(tab.id, iframe);
       holder.append(iframe);
     }
-    holder.setAttribute('aria-label', environments[tab.kind].name);
-    frames.get(tab.id).title = environments[tab.kind].name;
+    holder.setAttribute('aria-label', environmentName(tab.kind));
+    frames.get(tab.id).title = environmentName(tab.kind);
   }
   app.querySelector('#add').onclick = showChooser;
   if (active?.kind === 'audio' && audioWelcome) {
@@ -562,8 +562,8 @@ window.addEventListener('message', event => {
     const sender = tabs.find(tab => frames.get(tab.id)?.contentWindow === event.source);
     if (sender && ['raster', 'audio', 'video'].includes(sender.kind)) {
       frames.get(sender.id).dataset.ready = 'true';
-      if (sender.kind === 'raster' && typeof message.language === 'string' && /^[a-z]{2,3}(?:-[a-z]+)?$/i.test(message.language)) rasterLocale = message.language;
       reportSettings(sender.kind, { language: message.language, appearance: message.theme || message.appearance });
+      if (sender.kind === 'raster') rasterLocale = sharedSettings.language || languageCode(message.language) || rasterLocale;
       setDocumentState(sender.kind, message.documents, message.activeIndex);
     }
     return;
