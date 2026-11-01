@@ -344,6 +344,12 @@ function render() {
           child.addEventListener('keydown', event => {
             if (!(event.ctrlKey || event.metaKey)) return;
             const key = event.key.toLowerCase();
+            if (tab.kind === 'audio' && audioWelcome && (key === 'n' || key === 'o')) {
+              event.preventDefault();
+              event.stopImmediatePropagation();
+              app.querySelector(`[data-audio-action="${key}"]`)?.click();
+              return;
+            }
             if (tab.kind === 'vector' && key === 'c' && !event.shiftKey) {
               const api = child.vectorcraft;
               crossClipboardKind = 'vector';
