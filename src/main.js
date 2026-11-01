@@ -1,3 +1,4 @@
+import { putSnapshot, listSnapshots, removeSnapshot } from './recovery.js';
 const root = new URL('../', import.meta.url);
 const local = path => new URL(path, root).href;
 const environments = {
@@ -19,6 +20,9 @@ let vectorEdit = null;
 let bridgeStatus = '';
 let crossClipboard = null;
 let audioWelcome = true;
+const recoverySession = crypto.randomUUID();
+let recoveryShown = false;
+let recoveryTimer = null;
 const bridgeToken = location.hash.match(/^#bridge=([a-f0-9]{32})$/)?.[1] || null;
 const bridge = bridgeToken && window.opener ? { token: bridgeToken, opener: window.opener, origin: null, payload: null, rasterReady: false, sent: false } : null;
 const app = document.querySelector('#app');
@@ -129,6 +133,42 @@ function announceBridge() {
   if (!bridge || bridge.origin) return;
   try { if (!bridge.opener.closed) bridge.opener.postMessage({ type: 'vravio-bridge:ready', version: 1, token: bridge.token }, '*'); } catch { /* opener was closed */ }
 }
+function requestRasterSnapshot() {
+  const raster = tabs.find(t => t.kind === 'raster');
+  if (rasterReady) frames.get(raster?.id)?.contentWindow?.postMessage({ type: 'vravio-recovery:snapshot-request' }, location.origin);
+}
+async function showRasterRecovery() {
+  if (recoveryShown) return;
+  recoveryShown = true;
+  try {
+    const snapshots = await listSnapshots();
+    if (!snapshots.length) return;
+    const root = app.querySelector('#recovery-root');
+    if (!root) return;
+    root.innerHTML = `<div class="recovery-scrim"><div class="recovery-dialog" role="dialog" aria-modal="true" aria-label="Восстановление документов"><h2>Восстановить растровую работу?</h2><p>Найдены копии несохранённых документов. Они хранят слои и доступны только в этом браузере.</p><div class="recovery-list"></div><button class="recovery-later">Позже</button></div></div>`;
+    const list = root.querySelector('.recovery-list');
+    for (const snapshot of snapshots) {
+      const row = document.createElement('div');
+      row.className = 'recovery-row';
+      const label = document.createElement('span');
+      label.textContent = `${snapshot.name} · ${new Date(snapshot.savedAt).toLocaleString()}`;
+      const restore = document.createElement('button');
+      restore.textContent = 'Восстановить';
+      restore.onclick = () => {
+        const raster = tabs.find(t => t.kind === 'raster');
+        frames.get(raster?.id)?.contentWindow?.postMessage({ type: 'vravio-recovery:open', name: 'recovered.pcraft', bytes: snapshot.bytes }, location.origin);
+        root.replaceChildren();
+        if (raster) selectTab(raster.id);
+      };
+      const remove = document.createElement('button');
+      remove.textContent = 'Удалить копию';
+      remove.onclick = async () => { await removeSnapshot(snapshot.key); row.remove(); if (!list.children.length) root.replaceChildren(); };
+      row.append(label, restore, remove);
+      list.append(row);
+    }
+    root.querySelector('.recovery-later').onclick = () => root.replaceChildren();
+  } catch (error) { console.warn('Растровые копии недоступны:', error); }
+}
 if (bridge) { announceBridge(); setInterval(announceBridge, 1000); }
 
 function load() {
@@ -184,7 +224,7 @@ function render() {
   if (!app.querySelector('.workarea')) app.innerHTML = `
     <nav class="tabs" aria-label="Рабочие среды"></nav>
     <main class="workarea"></main>
-    <div id="modal-root"></div><div id="restorer-root"></div>`;
+    <div id="modal-root"></div><div id="restorer-root"></div><div id="recovery-root"></div>`;
   app.querySelector('.tabs').innerHTML = `
       ${tabs.map(t => `<div class="tab ${t.id === activeId ? 'selected' : ''}" style="--accent:${environments[t.kind].color}" data-id="${t.id}">
         <button class="tab-select" data-select="${t.id}" title="${environments[t.kind].name}"><img src="${environments[t.kind].icon}" alt=""><span>${environments[t.kind].name}</span></button>
@@ -317,6 +357,7 @@ window.addEventListener('beforeunload', event => {
   event.preventDefault();
   event.returnValue = '';
 });
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') requestRasterSnapshot(); });
 window.addEventListener('message', event => {
   const message = event.data;
   if (bridge && event.source === bridge.opener && message?.type === 'vravio-bridge:open') {
@@ -333,7 +374,21 @@ window.addEventListener('message', event => {
   if (event.origin !== location.origin) return;
   if (message?.type === 'vravio-bridge:raster-ready') {
     const raster = tabs.find(t => t.kind === 'raster');
-    if (raster && frames.get(raster.id)?.contentWindow === event.source) { rasterReady = true; if (bridge) bridge.rasterReady = true; deliverBridgePhoto(); deliverVectorImage(); }
+    if (raster && frames.get(raster.id)?.contentWindow === event.source) {
+      rasterReady = true;
+      if (bridge) bridge.rasterReady = true;
+      deliverBridgePhoto(); deliverVectorImage();
+      if (!recoveryTimer) recoveryTimer = setInterval(requestRasterSnapshot, 15_000);
+      void showRasterRecovery();
+    }
+    return;
+  }
+  if (message?.type === 'vravio-recovery:snapshot') {
+    const raster = tabs.find(t => t.kind === 'raster');
+    if (frames.get(raster?.id)?.contentWindow !== event.source) return;
+    const bytes = message.bytes instanceof ArrayBuffer ? new Uint8Array(message.bytes) : message.bytes;
+    if (!(bytes instanceof Uint8Array) || !bytes.length || bytes.length > 500_000_000 || !/^\d+$/.test(message.id) || !/^\d+$/.test(message.revision)) return;
+    void putSnapshot({ key: `${recoverySession}:${message.id}`, name: String(message.name || 'Документ').slice(0, 200), revision: message.revision, bytes, savedAt: Date.now() }).catch(error => console.warn('Не удалось сохранить растровую копию:', error));
     return;
   }
   if (vectorEdit && message?.type === 'vravio-bridge:saved' && message.token === vectorEdit.token) {

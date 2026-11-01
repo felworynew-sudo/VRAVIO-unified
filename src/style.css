@@ -33,6 +33,16 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .audio-welcome button { min-width: 170px; padding: 10px 16px; border: 1px solid #41454d; border-radius: 7px; background: #25262a; }
 .audio-welcome button:first-child { background: #f4f4f6; border-color: #f4f4f6; color: #161619; font-weight: 600; }
 .audio-welcome button:hover { border-color: #ffb600; }
+.recovery-scrim { position: fixed; inset: 0; z-index: 30; display: grid; place-items: center; background: #050506ce; padding: 20px; }
+.recovery-dialog { width: min(650px, 100%); max-height: 80vh; overflow: auto; padding: 24px; border: 1px solid #42424a; border-radius: 10px; background: #202024; box-shadow: 0 24px 80px #000b; }
+.recovery-dialog h2 { margin: 0 0 8px; font-size: 22px; }
+.recovery-dialog p { margin: 0 0 20px; color: #aaabb4; }
+.recovery-list { display: grid; gap: 8px; }
+.recovery-row { display: flex; align-items: center; gap: 8px; padding: 9px; border: 1px solid #414148; border-radius: 6px; }
+.recovery-row span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.recovery-row button, .recovery-later { padding: 6px 10px; border: 1px solid #55555c; border-radius: 5px; background: #303036; }
+.recovery-row button:hover, .recovery-later:hover { border-color: #a100ff; }
+.recovery-later { margin-top: 20px; }
 .scrim { position: fixed; inset: 0; display: grid; place-items: center; z-index: 10; background: #06080cba; padding: 20px; }
 #modal-root { display: contents; }
 .dialog { width: min(620px, 100%); padding: 22px; background: #20242c; border: 1px solid #414957; box-shadow: 0 20px 80px #000b; border-radius: 12px; }

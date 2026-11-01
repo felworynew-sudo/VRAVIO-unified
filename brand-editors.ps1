@@ -242,12 +242,12 @@ fn listen_restore_result(inbox: Inbox, cutout_inbox: CutoutInbox, restore_inbox:
 }
 '@
 Insert-Before-Once 'upstream/photocraft/apps/photocraft-web/src/web.rs' '/// Trigger a browser download of `bytes` named after the last component of `path`.' 'fn send_restore_input(' $restoreBridge
-Replace-Exact 'upstream/photocraft/apps/photocraft-web/src/web.rs' 'fn listen_restore_result(inbox: Inbox, ctx: egui::Context)' 'fn listen_restore_result(inbox: Inbox, cutout_inbox: CutoutInbox, restore_inbox: RestoreInbox, place_inbox: Inbox, ctx: egui::Context)'
+Replace-Exact 'upstream/photocraft/apps/photocraft-web/src/web.rs' 'fn listen_restore_result(inbox: Inbox, ctx: egui::Context)' 'fn listen_restore_result(inbox: Inbox, cutout_inbox: CutoutInbox, restore_inbox: RestoreInbox, place_inbox: Inbox, snapshot_requested: Arc<AtomicBool>, ctx: egui::Context)'
 Replace-Exact 'upstream/photocraft/apps/photocraft-web/src/web.rs' 'if js_sys::Reflect::get(&data, &"type".into()).ok().and_then(|v| v.as_string()).as_deref() != Some("vravio-restorer-result") { return }' 'let kind = js_sys::Reflect::get(&data, &"type".into()).ok().and_then(|v| v.as_string());'
 Insert-Before-Once 'upstream/photocraft/apps/photocraft-web/src/web.rs' '        let bytes = js_sys::Uint8Array::new(&js_sys::Reflect::get(&data, &"bytes".into()).unwrap_or_default()).to_vec();' 'if !matches!(kind.as_deref()' '        if !matches!(kind.as_deref(), Some("vravio-restorer-result" | "vravio-cutout-result")) { return }'
 Insert-Before-Once 'upstream/photocraft/apps/photocraft-web/src/web.rs' '        let name = js_sys::Reflect::get(&data, &"name".into())' 'cutout_inbox.lock().unwrap_or_else' "        if kind.as_deref() == Some(`"vravio-cutout-result`") {`n            cutout_inbox.lock().unwrap_or_else(PoisonError::into_inner).push(bytes);`n            ctx.request_repaint();`n            return;`n        }"
 Replace-Exact 'upstream/photocraft/apps/photocraft-web/src/web.rs' "type Inbox = Arc<Mutex<Vec<(String, Vec<u8>)>>>;`n`n" "type Inbox = Arc<Mutex<Vec<(String, Vec<u8>)>>>;`ntype CutoutInbox = Arc<Mutex<Vec<Vec<u8>>>>;`ntype RestoreInbox = Arc<Mutex<Vec<(String, Vec<u8>, Vec<u8>)>>>;`n`n"
-Replace-Exact 'upstream/photocraft/apps/photocraft-web/src/web.rs' 'WebShell { app, inbox, place_inbox, unsaved' 'WebShell { app, inbox, cutout_inbox, restore_inbox, place_inbox, unsaved'
+Replace-Exact 'upstream/photocraft/apps/photocraft-web/src/web.rs' 'WebShell { app, inbox, place_inbox, unsaved' 'WebShell { app, inbox, cutout_inbox, restore_inbox, place_inbox, snapshot_requested, snapshot_revisions: HashMap::new(), unsaved'
 Insert-Before-Once 'upstream/photocraft/apps/photocraft-web/src/web.rs' '    /// Dropped files to place on the active document' '    cutout_inbox: CutoutInbox,' '    cutout_inbox: CutoutInbox,'
 Insert-Before-Once 'upstream/photocraft/apps/photocraft-web/src/web.rs' '    /// Dropped files to place on the active document' '    restore_inbox: RestoreInbox,' '    restore_inbox: RestoreInbox,'
 $applyAiMask = @'
@@ -414,4 +414,62 @@ foreach ($line in @(
   'ui.hyperlink_to("getartcraft.com/apps/soundcraft", "https://getartcraft.com/apps/soundcraft");',
   'ui.hyperlink_to("Join us on Discord", "https://discord.gg/artcraft");'
 )) { Replace-Exact 'upstream/soundcraft/crates/ui-egui/src/panels/about.rs' $line '' }
+
+# The browser raster editor periodically exports changed documents in its native,
+# layered format. The parent shell owns durable IndexedDB storage and recovery UI.
+$rasterWeb = 'upstream/photocraft/apps/photocraft-web/src/web.rs'
+Insert-Before-Once $rasterWeb '                    notify_bridge_ready();' 'let snapshot_requested = Arc::new(AtomicBool::new(false));' '                    let snapshot_requested = Arc::new(AtomicBool::new(false));'
+Replace-Exact $rasterWeb 'listen_restore_result(inbox.clone(), cutout_inbox.clone(), restore_inbox.clone(), place_inbox.clone(), cc.egui_ctx.clone());' 'listen_restore_result(inbox.clone(), cutout_inbox.clone(), restore_inbox.clone(), place_inbox.clone(), snapshot_requested.clone(), cc.egui_ctx.clone());'
+Insert-After-Once $rasterWeb '    restore_inbox: RestoreInbox,' 'snapshot_requested: Arc<AtomicBool>' "    snapshot_requested: Arc<AtomicBool>,`n    snapshot_revisions: HashMap<u64, u64>,"
+$snapshotMethod = @'
+    fn snapshot_dirty(&mut self) {
+        if !self.snapshot_requested.swap(false, Ordering::Relaxed) { return; }
+        for state in self.app.session.documents() {
+            if !state.is_dirty() || self.snapshot_revisions.get(&state.doc.id.0) == Some(&state.revision) { continue; }
+            match photocraft_io::export(&state.doc, "recovery.pcraft", &photocraft_io::ExportOptions::default()) {
+                Ok(encoded) => match send_recovery_snapshot(state.doc.id.0, &state.doc.name, state.revision, &encoded.bytes) {
+                    Ok(()) => { self.snapshot_revisions.insert(state.doc.id.0, state.revision); }
+                    Err(error) => log::error!("recovery snapshot delivery failed: {error}"),
+                },
+                Err(error) => log::error!("recovery snapshot export failed: {error}"),
+            }
+        }
+    }
+'@
+Insert-Before-Once $rasterWeb '    fn save_presets(&mut self, ctx: &egui::Context) {' 'fn snapshot_dirty(&mut self)' $snapshotMethod
+Insert-After-Once $rasterWeb '        self.app.logic_frame(ctx, frame);' 'self.snapshot_dirty();' '        self.snapshot_dirty();'
+$snapshotSender = @'
+fn send_recovery_snapshot(id: u64, name: &str, revision: u64, bytes: &[u8]) -> Result<(), String> {
+    let js = |e: wasm_bindgen::JsValue| format!("{e:?}");
+    let window = web_sys::window().ok_or("no window")?;
+    let parent = js_sys::Reflect::get(window.as_ref(), &"parent".into()).map_err(js)?;
+    let post = js_sys::Reflect::get(&parent, &"postMessage".into()).map_err(js)?.dyn_into::<js_sys::Function>().map_err(|_| "no postMessage")?;
+    let message = js_sys::Object::new();
+    js_sys::Reflect::set(&message, &"type".into(), &"vravio-recovery:snapshot".into()).map_err(js)?;
+    js_sys::Reflect::set(&message, &"id".into(), &id.to_string().into()).map_err(js)?;
+    js_sys::Reflect::set(&message, &"name".into(), &name.into()).map_err(js)?;
+    js_sys::Reflect::set(&message, &"revision".into(), &revision.to_string().into()).map_err(js)?;
+    js_sys::Reflect::set(&message, &"bytes".into(), &js_sys::Uint8Array::from(bytes).into()).map_err(js)?;
+    post.call2(&parent, &message, &window.location().origin().map_err(js)?.into()).map_err(js)?;
+    Ok(())
+}
+'@
+Insert-Before-Once $rasterWeb 'fn send_bridge_result(path: &str, bytes: &[u8])' 'fn send_recovery_snapshot(' $snapshotSender
+$snapshotReceiver = @'
+        if kind.as_deref() == Some("vravio-recovery:snapshot-request") {
+            snapshot_requested.store(true, Ordering::Relaxed);
+            ctx.request_repaint();
+            return;
+        }
+        if kind.as_deref() == Some("vravio-recovery:open") {
+            let name = js_sys::Reflect::get(&data, &"name".into()).ok().and_then(|v| v.as_string()).unwrap_or_default();
+            if !name.ends_with(".pcraft") || name.len() > 200 { return }
+            let bytes = js_sys::Uint8Array::new(&js_sys::Reflect::get(&data, &"bytes".into()).unwrap_or_default()).to_vec();
+            if bytes.len() > 500_000_000 || bytes.is_empty() { return }
+            inbox.lock().unwrap_or_else(PoisonError::into_inner).push((name, bytes));
+            ctx.request_repaint();
+            return;
+        }
+'@
+Insert-Before-Once $rasterWeb '        if kind.as_deref() == Some("vravio-bridge:open") {' 'vravio-recovery:snapshot-request' $snapshotReceiver
 Write-Output 'VRAVIO branding applied to UI sources.'
