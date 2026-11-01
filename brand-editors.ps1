@@ -417,6 +417,23 @@ foreach ($line in @(
 # The browser raster editor periodically exports changed documents in its native,
 # layered format. The parent shell owns durable IndexedDB storage and recovery UI.
 $rasterWeb = 'upstream/photocraft/apps/photocraft-web/src/web.rs'
+$clipboardSender = @'
+fn send_clipboard_image(width: u32, height: u32, pixels: &[u8]) -> Result<(), String> {
+    let js = |e: wasm_bindgen::JsValue| format!("{e:?}");
+    let window = web_sys::window().ok_or("no window")?;
+    let parent = js_sys::Reflect::get(window.as_ref(), &"parent".into()).map_err(js)?;
+    let post = js_sys::Reflect::get(&parent, &"postMessage".into()).map_err(js)?.dyn_into::<js_sys::Function>().map_err(|_| "no postMessage")?;
+    let message = js_sys::Object::new();
+    js_sys::Reflect::set(&message, &"type".into(), &"vravio-clipboard:image".into()).map_err(js)?;
+    js_sys::Reflect::set(&message, &"width".into(), &wasm_bindgen::JsValue::from_f64(width as f64)).map_err(js)?;
+    js_sys::Reflect::set(&message, &"height".into(), &wasm_bindgen::JsValue::from_f64(height as f64)).map_err(js)?;
+    js_sys::Reflect::set(&message, &"pixels".into(), &js_sys::Uint8Array::from(pixels).into()).map_err(js)?;
+    post.call2(&parent, &message, &window.location().origin().map_err(js)?.into()).map_err(js)?;
+    Ok(())
+}
+'@
+Insert-Before-Once $rasterWeb 'fn send_bridge_result(path: &str, bytes: &[u8])' 'fn send_clipboard_image(' $clipboardSender
+Insert-Before-Once $rasterWeb '        import: Some(Box::new(|name: &str, bytes: &[u8], opts: &photocraft_io::ImportOptions|' 'clipboard_set_image: Some(Box::new(|width, height, pixels|' '        clipboard_set_image: Some(Box::new(|width, height, pixels| send_clipboard_image(width, height, pixels))),'
 Insert-Before-Once $rasterWeb '                    notify_bridge_ready();' 'let snapshot_requested = Arc::new(AtomicBool::new(false));' '                    let snapshot_requested = Arc::new(AtomicBool::new(false));'
 Replace-Exact $rasterWeb 'listen_restore_result(inbox.clone(), cutout_inbox.clone(), restore_inbox.clone(), place_inbox.clone(), cc.egui_ctx.clone());' 'listen_restore_result(inbox.clone(), cutout_inbox.clone(), restore_inbox.clone(), place_inbox.clone(), snapshot_requested.clone(), cc.egui_ctx.clone());'
 Insert-After-Once $rasterWeb '    restore_inbox: RestoreInbox,' '    snapshot_revisions: HashMap<u64, u64>,' "    snapshot_requested: Arc<AtomicBool>,`n    snapshot_revisions: HashMap<u64, u64>,"
@@ -425,7 +442,8 @@ $snapshotMethod = @'
         if !self.snapshot_requested.swap(false, Ordering::Relaxed) { return; }
         for state in self.app.session.documents() {
             if !state.is_dirty() || self.snapshot_revisions.get(&state.doc.id.0) == Some(&state.revision) { continue; }
-            match photocraft_io::export(&state.doc, "recovery.pcraft", &photocraft_io::ExportOptions::default()) {
+            let recovery_name = format!("{}.pcraft", state.doc.name.trim_end_matches(".pcraft"));
+            match photocraft_io::export(&state.doc, &recovery_name, &photocraft_io::ExportOptions::default()) {
                 Ok(encoded) => match send_recovery_snapshot(state.doc.id.0, &state.doc.name, state.revision, &encoded.bytes) {
                     Ok(()) => { self.snapshot_revisions.insert(state.doc.id.0, state.revision); }
                     Err(error) => log::error!("recovery snapshot delivery failed: {error}"),

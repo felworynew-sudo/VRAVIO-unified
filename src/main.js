@@ -19,6 +19,7 @@ let rasterReady = false;
 let vectorEdit = null;
 let bridgeStatus = '';
 let crossClipboard = null;
+let crossClipboardKind = null;
 let audioWelcome = true;
 const recoverySession = crypto.randomUUID();
 let recoveryShown = false;
@@ -80,6 +81,13 @@ async function cropTransparentPng(bytes) {
     cropped.getContext('2d').drawImage(canvas, left, top, cropped.width, cropped.height, 0, 0, cropped.width, cropped.height);
     return new Uint8Array(await new Promise((resolve, reject) => cropped.toBlob(blob => blob ? blob.arrayBuffer().then(resolve, reject) : reject(new Error('Не удалось скопировать выделение')), 'image/png')));
   } finally { bitmap.close(); }
+}
+async function rgbaToPng(width, height, pixels) {
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  canvas.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(pixels), width, height), 0, 0);
+  return new Uint8Array(await new Promise((resolve, reject) => canvas.toBlob(blob => blob ? blob.arrayBuffer().then(resolve, reject) : reject(new Error('Не удалось скопировать изображение')), 'image/png')));
 }
 function deliverVectorImage() {
   if (!vectorEdit?.payload || !rasterReady) return;
@@ -156,7 +164,8 @@ async function showRasterRecovery() {
       restore.textContent = 'Восстановить';
       restore.onclick = () => {
         const raster = tabs.find(t => t.kind === 'raster');
-        frames.get(raster?.id)?.contentWindow?.postMessage({ type: 'vravio-recovery:open', name: 'recovered.pcraft', bytes: snapshot.bytes }, location.origin);
+        const name = `${String(snapshot.name || 'Документ').replace(/\.pcraft$/i, '')}.pcraft`;
+        frames.get(raster?.id)?.contentWindow?.postMessage({ type: 'vravio-recovery:open', name, bytes: snapshot.bytes }, location.origin);
         root.replaceChildren();
         if (raster) selectTab(raster.id);
       };
@@ -280,16 +289,28 @@ function render() {
             const key = event.key.toLowerCase();
             if (tab.kind === 'vector' && key === 'c' && !event.shiftKey) {
               const api = child.vectorcraft;
+              crossClipboardKind = 'vector';
               crossClipboard = api?.execute('document.serialize', { format: 'png', selectedOnly: true }).then(result => cropTransparentPng(bytesFromBase64(result.dataBase64))).catch(() => null) ?? null;
-            } else if (tab.kind !== 'vector' && (key === 'c' || key === 'x')) {
+            } else if (tab.kind !== 'raster' && tab.kind !== 'vector' && (key === 'c' || key === 'x')) {
+              crossClipboardKind = null;
               crossClipboard = null;
             }
-            if (tab.kind === 'raster' && key === 'v' && crossClipboard) {
+            if (tab.kind === 'raster' && key === 'v' && crossClipboardKind === 'vector' && crossClipboard) {
               event.preventDefault();
               event.stopImmediatePropagation();
               void crossClipboard.then(bytes => {
                 if (!bytes) return;
                 child.postMessage({ type: 'vravio-restorer-result', mode: 'current', name: 'vector-selection.png', bytes }, location.origin);
+              });
+              return;
+            }
+            if (tab.kind === 'vector' && key === 'v' && crossClipboardKind === 'raster' && crossClipboard) {
+              event.preventDefault();
+              event.stopImmediatePropagation();
+              void crossClipboard.then(async bytes => {
+                if (!bytes) return;
+                try { await child.vectorcraft.execute('file.place', { name: 'raster-selection.png', dataBase64: base64FromBytes(bytes) }); }
+                catch (error) { bridgeStatus = `Не удалось вставить в вектор: ${error.message}`; render(); }
               });
               return;
             }
@@ -389,6 +410,16 @@ window.addEventListener('message', event => {
     const bytes = message.bytes instanceof ArrayBuffer ? new Uint8Array(message.bytes) : message.bytes;
     if (!(bytes instanceof Uint8Array) || !bytes.length || bytes.length > 500_000_000 || !/^\d+$/.test(message.id) || !/^\d+$/.test(message.revision)) return;
     void putSnapshot({ key: `${recoverySession}:${message.id}`, name: String(message.name || 'Документ').slice(0, 200), revision: message.revision, bytes, savedAt: Date.now() }).catch(error => console.warn('Не удалось сохранить растровую копию:', error));
+    return;
+  }
+  if (message?.type === 'vravio-clipboard:image') {
+    const raster = tabs.find(t => t.kind === 'raster');
+    if (frames.get(raster?.id)?.contentWindow !== event.source) return;
+    const { width, height } = message;
+    const pixels = message.pixels instanceof ArrayBuffer ? new Uint8Array(message.pixels) : message.pixels;
+    if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1 || width * height > 16_000_000 || !(pixels instanceof Uint8Array) || pixels.length !== width * height * 4) return;
+    crossClipboardKind = 'raster';
+    crossClipboard = rgbaToPng(width, height, pixels).catch(() => null);
     return;
   }
   if (vectorEdit && message?.type === 'vravio-bridge:saved' && message.token === vectorEdit.token) {
