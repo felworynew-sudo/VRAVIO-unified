@@ -290,15 +290,18 @@ function render() {
         const selected = tab.id === activeId && (!document || documentStates.get(tab.kind)?.activeIndex === index);
         const name = document ? document.name : environments[tab.kind].name;
         return `<div class="tab ${selected ? 'selected' : ''}" style="--accent:${environments[tab.kind].color}" data-key="${escapeText(key)}" draggable="${document ? 'true' : 'false'}">
-          <button class="tab-select" ${document ? `data-document="${tab.kind}:${index}"` : `data-select="${tab.id}"`} title="${escapeText(name)}"><img src="${environments[tab.kind].icon}" alt=""><span>${escapeText(name)}${document?.dirty ? ' •' : ''}</span></button>
+          <button class="tab-select" ${document ? `data-document="${tab.kind}:${index}"` : `data-select="${tab.id}"`} title="${escapeText(environments[tab.kind].name)}: ${escapeText(name)}" aria-label="${escapeText(environments[tab.kind].name)}: ${escapeText(name)}"><img src="${environments[tab.kind].icon}" alt=""><span>${escapeText(name)}${document?.dirty ? ' •' : ''}</span></button>
           <button class="tab-close" ${document ? `data-close-document="${tab.kind}:${index}"` : `data-close="${tab.id}"`} aria-label="Закрыть ${document ? 'документ' : 'среду'} ${escapeText(name)}">×</button>
         </div>`;
       }).join('')}
       <button class="tab-add" id="add" title="Открыть рабочую среду" aria-label="Открыть рабочую среду">＋</button>`;
   if (bridge) app.querySelector('.tabs').insertAdjacentHTML('beforeend', '<span class="bridge-label" title="Ctrl+S отправит результат в сортировщик">Связано с сортировщиком · Ctrl+S для возврата</span>');
-  if (bridgeStatus) app.querySelector('.tabs').insertAdjacentHTML('beforeend', `<span class="bridge-status" role="status"></span>`);
-  if (bridgeStatus) app.querySelector('.bridge-status').textContent = bridgeStatus;
   const workarea = app.querySelector('.workarea');
+  workarea.querySelector('.bridge-status')?.remove();
+  if (bridgeStatus) {
+    workarea.insertAdjacentHTML('beforeend', '<span class="bridge-status" role="status"></span>');
+    workarea.querySelector('.bridge-status').textContent = bridgeStatus;
+  }
   workarea.querySelector('.welcome')?.remove();
   workarea.querySelector('.audio-welcome')?.remove();
   if (!active) workarea.insertAdjacentHTML('beforeend', `<div class="welcome"><img src="${local('assets/logo.svg')}" alt="VRAVIO"><h1>Выберите рабочую среду</h1><p>Растр, вектор, аудио и видео в одном окне.</p><button id="welcome-new">Открыть среду</button></div>`);

@@ -15,7 +15,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .tab-close:hover, .tab-add:hover { color: #fff; background: #343b47; }
 .tab-add { flex: 0 0 36px; }
 .bridge-label { align-self: center; margin-left: auto; padding: 0 12px; color: #b8c8e4; font-size: 12px; white-space: nowrap; }
-.bridge-status { align-self: center; max-width: 390px; padding: 0 10px; color: #b8c8e4; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bridge-status { position: absolute; z-index: 5; bottom: 18px; left: 50%; transform: translateX(-50%); max-width: min(520px, 90%); padding: 9px 14px; border: 1px solid #414957; border-radius: 6px; background: #20242cee; box-shadow: 0 8px 24px #0009; color: #dce6f8; font-size: 12px; text-align: center; pointer-events: none; }
 .workarea { position: relative; min-height: 0; background: #141415; }
 .editor-frame { position: absolute; inset: 0; display: none; }
 .editor-frame.active { display: block; }

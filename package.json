@@ -4,8 +4,8 @@
   "type": "module",
   "version": "0.1.0",
   "scripts": {
-    "build:shell": "powershell -NoProfile -File build-web.ps1 -ShellOnly",
-    "build:web": "powershell -NoProfile -File build-web.ps1",
+    "build:shell": "pwsh -NoProfile -File build-web.ps1 -ShellOnly",
+    "build:web": "pwsh -NoProfile -File build-web.ps1",
     "build:desktop": "npm run build:web && tauri build"
   },
   "devDependencies": {
