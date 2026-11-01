@@ -245,8 +245,8 @@ Insert-Before-Once 'upstream/photocraft/apps/photocraft-web/src/web.rs' '/// Tri
 Replace-Exact 'upstream/photocraft/apps/photocraft-web/src/web.rs' 'if js_sys::Reflect::get(&data, &"type".into()).ok().and_then(|v| v.as_string()).as_deref() != Some("vravio-restorer-result") { return }' 'let kind = js_sys::Reflect::get(&data, &"type".into()).ok().and_then(|v| v.as_string());'
 Insert-Before-Once 'upstream/photocraft/apps/photocraft-web/src/web.rs' '        let bytes = js_sys::Uint8Array::new(&js_sys::Reflect::get(&data, &"bytes".into()).unwrap_or_default()).to_vec();' 'if !matches!(kind.as_deref()' '        if !matches!(kind.as_deref(), Some("vravio-restorer-result" | "vravio-cutout-result")) { return }'
 Insert-Before-Once 'upstream/photocraft/apps/photocraft-web/src/web.rs' '        let name = js_sys::Reflect::get(&data, &"name".into())' 'cutout_inbox.lock().unwrap_or_else' "        if kind.as_deref() == Some(`"vravio-cutout-result`") {`n            cutout_inbox.lock().unwrap_or_else(PoisonError::into_inner).push(bytes);`n            ctx.request_repaint();`n            return;`n        }"
-Replace-Exact 'upstream/photocraft/apps/photocraft-web/src/web.rs' "type Inbox = Arc<Mutex<Vec<(String, Vec<u8>)>>>;`n`n" "type Inbox = Arc<Mutex<Vec<(String, Vec<u8>)>>>;`ntype CutoutInbox = Arc<Mutex<Vec<Vec<u8>>>>;`ntype RestoreInbox = Arc<Mutex<Vec<(String, Vec<u8>, Vec<u8>)>>>;`ntype TabAction = Arc<Mutex<Option<(String, usize)>>>;`n`n"
-Replace-Exact 'upstream/photocraft/apps/photocraft-web/src/web.rs' 'WebShell { app, inbox, place_inbox, unsaved' 'WebShell { app, inbox, cutout_inbox, restore_inbox, place_inbox, snapshot_requested, snapshot_revisions: HashMap::new(), tab_action, tab_state: String::new(), unsaved'
+Replace-Exact 'upstream/photocraft/apps/photocraft-web/src/web.rs' "type Inbox = Arc<Mutex<Vec<(String, Vec<u8>)>>>;`n`n" "type Inbox = Arc<Mutex<Vec<(String, Vec<u8>)>>>;`ntype CutoutInbox = Arc<Mutex<Vec<Vec<u8>>>>;`ntype RestoreInbox = Arc<Mutex<Vec<(String, Vec<u8>, Vec<u8>)>>>;`ntype TabAction = Arc<Mutex<Option<(String, usize)>>>;`ntype UnifiedSettings = Arc<Mutex<Option<(Option<String>, Option<String>)>>>;`n`n"
+Replace-Exact 'upstream/photocraft/apps/photocraft-web/src/web.rs' 'WebShell { app, inbox, place_inbox, unsaved' 'WebShell { app, inbox, cutout_inbox, restore_inbox, place_inbox, snapshot_requested, snapshot_revisions: HashMap::new(), tab_action, tab_state: String::new(), unified_settings, unsaved'
 Insert-Before-Once 'upstream/photocraft/apps/photocraft-web/src/web.rs' '    /// Dropped files to place on the active document' '    cutout_inbox: CutoutInbox,' '    cutout_inbox: CutoutInbox,'
 Insert-Before-Once 'upstream/photocraft/apps/photocraft-web/src/web.rs' '    /// Dropped files to place on the active document' '    restore_inbox: RestoreInbox,' '    restore_inbox: RestoreInbox,'
 $applyAiMask = @'
@@ -424,7 +424,7 @@ Replace-Exact $rasterWeb 'type RestoreInbox = Arc<Mutex<Vec<(String, Vec<u8>, Ve
 Replace-Exact $rasterWeb '                    cc.egui_ctx.data_mut(|data| data.insert_temp(egui::Id::new("vravio-unified-tabs"), true));' ''
 Insert-Before-Once $rasterWeb '                    notify_bridge_ready();' 'let tab_action: TabAction' '                    let tab_action: TabAction = Arc::default();'
 Replace-Exact $rasterWeb 'listen_restore_result(inbox.clone(), cutout_inbox.clone(), restore_inbox.clone(), place_inbox.clone(), snapshot_requested.clone(), cc.egui_ctx.clone());' 'listen_restore_result(inbox.clone(), cutout_inbox.clone(), restore_inbox.clone(), place_inbox.clone(), snapshot_requested.clone(), tab_action.clone(), cc.egui_ctx.clone());'
-Replace-Exact $rasterWeb 'place_inbox, snapshot_requested, snapshot_revisions: HashMap::new(), unsaved' 'place_inbox, snapshot_requested, snapshot_revisions: HashMap::new(), tab_action, tab_state: String::new(), unsaved'
+Replace-Exact $rasterWeb 'place_inbox, snapshot_requested, snapshot_revisions: HashMap::new(), unsaved' 'place_inbox, snapshot_requested, snapshot_revisions: HashMap::new(), tab_action, tab_state: String::new(), unified_settings, unsaved'
 Insert-After-Once $rasterWeb '    restore_inbox: RestoreInbox,' '    tab_state: String,' "    snapshot_requested: Arc<AtomicBool>,`n    snapshot_revisions: HashMap<u64, u64>,`n    tab_action: TabAction,`n    tab_state: String,"
 $tabStateMethod = @'
     fn sync_document_tabs(&mut self) {
@@ -439,6 +439,39 @@ $tabStateMethod = @'
 '@
 Insert-Before-Once $rasterWeb '    fn save_presets(&mut self, ctx: &egui::Context) {' 'fn sync_document_tabs(&mut self)' $tabStateMethod
 Insert-After-Once $rasterWeb '        self.app.ui_frame(ui, frame);' 'self.sync_document_tabs();' '        self.sync_document_tabs();'
+$rasterSettingsListener = @'
+fn listen_unified_settings(settings: UnifiedSettings, ctx: egui::Context) {
+    use wasm_bindgen::closure::Closure;
+    let Some(window) = web_sys::window() else { return };
+    let cb = Closure::<dyn FnMut(web_sys::MessageEvent)>::new(move |event| {
+        let Some(window) = web_sys::window() else { return };
+        if window.location().origin().ok().as_deref() != Some(event.origin().as_str()) { return }
+        let data = event.data();
+        if js_sys::Reflect::get(&data, &"type".into()).ok().and_then(|v| v.as_string()).as_deref() != Some("vravio-settings:apply") { return }
+        let language = js_sys::Reflect::get(&data, &"language".into()).ok().and_then(|v| v.as_string()).filter(|v| v.len() <= 16);
+        let appearance = js_sys::Reflect::get(&data, &"appearance".into()).ok().and_then(|v| v.as_string()).filter(|v| v == "dark" || v == "light");
+        *settings.lock().unwrap_or_else(PoisonError::into_inner) = Some((language, appearance));
+        ctx.request_repaint();
+    });
+    if window.add_event_listener_with_callback("message", cb.as_ref().unchecked_ref()).is_ok() { cb.forget(); }
+}
+'@
+Insert-Before-Once $rasterWeb 'fn listen_restore_result(' 'fn listen_unified_settings(' $rasterSettingsListener
+Insert-After-Once $rasterWeb 'type TabAction = Arc<Mutex<Option<(String, usize)>>>;' 'type UnifiedSettings =' 'type UnifiedSettings = Arc<Mutex<Option<(Option<String>, Option<String>)>>>;'
+Insert-After-Once $rasterWeb '                    let tab_action: TabAction = Arc::default();' 'let unified_settings: UnifiedSettings' "                    let unified_settings: UnifiedSettings = Arc::default();`n                    listen_unified_settings(unified_settings.clone(), cc.egui_ctx.clone());"
+Insert-After-Once $rasterWeb '    tab_state: String,' '    unified_settings: UnifiedSettings,' '    unified_settings: UnifiedSettings,'
+Replace-Exact $rasterWeb '"language": photocraft_ui_egui::i18n::current().code()' '"language": photocraft_ui_egui::i18n::current().code(), "theme": self.app.ui.theme.id()'
+Insert-After-Once $rasterWeb '    fn logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {' 'let settings = self.unified_settings' @'
+        let settings = self.unified_settings.lock().unwrap_or_else(PoisonError::into_inner).take();
+        if let Some((language, appearance)) = settings {
+            if let Some(language) = language {
+                if let Err(error) = self.app.run("prefs.set", serde_json::json!({"path":"interface.language","value":language})) { self.app.ui.status = error; }
+            }
+            if let Some(appearance) = appearance {
+                self.app.set_theme(ctx, if appearance == "light" { ThemeKind::StudioLight } else { ThemeKind::Studio });
+            }
+        }
+'@
 $tabSender = @'
 fn send_document_tabs(payload: &str) -> Result<(), String> {
     let js = |e: wasm_bindgen::JsValue| format!("{e:?}");
@@ -487,8 +520,29 @@ Replace-Exact 'upstream/vectorcraft/crates/ui-egui/src/app.rs' 'if self.ui.scree
 # A sound session and a video project are single documents. Publish their live
 # name/dirty state to the same shell strip used by raster and vector documents.
 $audioWeb = 'upstream/soundcraft/apps/soundcraft-web/src/web.rs'
+$audioSettingsListener = @'
+type UnifiedAppearance = Rc<RefCell<Option<String>>>;
+fn listen_unified_appearance(settings: UnifiedAppearance, ctx: egui::Context) {
+    use wasm_bindgen::closure::Closure;
+    let Some(window) = web_sys::window() else { return };
+    let cb = Closure::<dyn FnMut(web_sys::MessageEvent)>::new(move |event| {
+        let Some(window) = web_sys::window() else { return };
+        if window.location().origin().ok().as_deref() != Some(event.origin().as_str()) { return }
+        let data = event.data();
+        if js_sys::Reflect::get(&data, &"type".into()).ok().and_then(|v| v.as_string()).as_deref() != Some("vravio-settings:apply") { return }
+        let appearance = js_sys::Reflect::get(&data, &"appearance".into()).ok().and_then(|v| v.as_string()).filter(|v| v == "dark" || v == "light");
+        *settings.borrow_mut() = appearance;
+        ctx.request_repaint();
+    });
+    if window.add_event_listener_with_callback("message", cb.as_ref().unchecked_ref()).is_ok() { cb.forget(); }
+}
+'@
+Insert-Before-Once $audioWeb 'const CANVAS_ID:' 'fn listen_unified_appearance(' $audioSettingsListener
+Replace-Exact 'upstream/soundcraft/apps/soundcraft-web/Cargo.toml' '"CssStyleDeclaration"]' '"CssStyleDeclaration", "MessageEvent", "EventTarget"]'
 Insert-After-Once $audioWeb '    samples: SampleInbox,' 'tab_state: String,' '    tab_state: String,'
-Replace-Exact $audioWeb 'WebShell { app, inbox: Rc::default(), samples: Rc::default() }' 'WebShell { app, inbox: Rc::default(), samples: Rc::default(), tab_state: String::new() }'
+Replace-Exact $audioWeb 'WebShell { app, inbox: Rc::default(), samples: Rc::default() }' 'WebShell { app, inbox: Rc::default(), samples: Rc::default(), tab_state: String::new(), unified_appearance }'
+Insert-After-Once $audioWeb '    tab_state: String,' '    unified_appearance: UnifiedAppearance,' '    unified_appearance: UnifiedAppearance,'
+Insert-After-Once $audioWeb '                    let app = SoundApp::new(engine, Some(player), Services::default());' 'let unified_appearance: UnifiedAppearance' "                    let unified_appearance: UnifiedAppearance = Rc::default();`n                    listen_unified_appearance(unified_appearance.clone(), cc.egui_ctx.clone());"
 $audioTabSender = @'
 fn vravio_send_tab(payload: &str) -> Result<(), String> {
     let window = web_sys::window().ok_or("no window")?;
@@ -507,12 +561,17 @@ $audioTabMethod = @'
         let session = self.app.engine.session();
         let payload = serde_json::json!({"type":"vravio-documents:state","documents":[{
             "id":"session", "name":session.name, "dirty":self.app.engine.is_dirty()
-        }], "activeIndex":0}).to_string();
+        }], "activeIndex":0, "appearance":self.app.ui.theme.id()}).to_string();
         if payload != self.tab_state && vravio_send_tab(&payload).is_ok() { self.tab_state = payload; }
     }
 '@
 Insert-Before-Once $audioWeb '    /// File > Open Session…' 'fn vravio_sync_tab(&mut self)' $audioTabMethod
 Insert-After-Once $audioWeb '        self.app.ui(ui);' 'self.vravio_sync_tab();' '        self.vravio_sync_tab();'
+Insert-After-Once $audioWeb '    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {' 'self.unified_appearance.borrow_mut().take()' @'
+        if let Some(appearance) = self.unified_appearance.borrow_mut().take() {
+            if let Err(error) = self.app.run("ui.theme", serde_json::json!({"mode":appearance})) { self.app.ui.status = error; }
+        }
+'@
 
 $videoWeb = 'upstream/filmcraft/apps/filmcraft-web/src/lib.rs'
 Insert-After-Once $videoWeb '    pub autosave: recovery::Autosave,' 'tab_state: String,' '    tab_state: String,'
@@ -535,7 +594,7 @@ $videoTabMethod = @'
     fn vravio_sync_tab(&mut self) {
         let payload = serde_json::json!({"type":"vravio-documents:state","documents":[{
             "id":"project", "name":self.app.session.project.name, "dirty":self.app.session.is_dirty()
-        }], "activeIndex":0}).to_string();
+        }], "activeIndex":0, "language":self.app.session.prefs.general.interface_language, "appearance":self.app.session.prefs.appearance.appearance_mode}).to_string();
         if payload != self.tab_state && vravio_send_tab(&payload).is_ok() { self.tab_state = payload; }
     }
 '@

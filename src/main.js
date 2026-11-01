@@ -18,6 +18,17 @@ let restorerSource = null;
 let restoreCleanup = null;
 let restoreGeneration = 0;
 let rasterLocale = navigator.language || 'en';
+const settingsKey = 'vravio-unified-settings-v1';
+let sharedSettings = { language: null, appearance: null };
+try {
+  const saved = JSON.parse(localStorage.getItem(settingsKey) || '{}');
+  if (typeof saved.language === 'string' && /^[a-z]{2,3}(?:-[a-z]+)?$/i.test(saved.language)) sharedSettings.language = saved.language;
+  if (saved.appearance === 'dark' || saved.appearance === 'light') sharedSettings.appearance = saved.appearance;
+} catch { /* Invalid settings must not block the editors. */ }
+document.documentElement.dataset.appearance = sharedSettings.appearance || 'dark';
+const pendingSettings = new Map();
+const settingsApplying = new Set();
+const seenSettings = new Set();
 let rasterReady = false;
 let vectorEdit = null;
 let bridgeStatus = '';
@@ -212,15 +223,84 @@ function setDocumentState(kind, documents, activeIndex) {
   documentStates.set(kind, next);
   render();
 }
+function languageCode(value) {
+  if (typeof value !== 'string') return null;
+  if (value === 'auto' || value === 'system') value = navigator.language;
+  return /^[a-z]{2,3}(?:-[a-z]+)?$/i.test(value) ? value.toLowerCase() : null;
+}
+function appearanceCode(value, kind) {
+  if (typeof value !== 'string') return null;
+  if (value === 'auto' || value === 'system') return matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+  if (kind === 'raster') return ['studioLight', 'proLight', 'proLightGray', 'adwaita', 'breezeLight', 'softLight', 'classic'].includes(value) ? 'light' : 'dark';
+  if (kind === 'vector') return ['light', 'mediumLight'].includes(value) ? 'light' : 'dark';
+  return value === 'light' || value === 'dark' ? value : null;
+}
+function reportSettings(kind, values) {
+  const reported = { language: languageCode(values.language), appearance: appearanceCode(values.appearance, kind) };
+  if (!seenSettings.has(kind)) {
+    seenSettings.add(kind);
+    if (Object.entries(reported).some(([key, value]) => value && sharedSettings[key] && value !== sharedSettings[key])) {
+      void applySettings(kind);
+      return;
+    }
+  }
+  const waiting = pendingSettings.get(kind);
+  let changed = false;
+  for (const [key, value] of Object.entries(reported)) {
+    if (!value) continue;
+    if (waiting?.[key] && Date.now() < waiting.until) {
+      if (waiting[key] === value) waiting[key] = null;
+      else continue;
+    }
+    if (sharedSettings[key] !== value) { sharedSettings[key] = value; changed = true; }
+  }
+  if (!changed) return;
+  try { localStorage.setItem(settingsKey, JSON.stringify(sharedSettings)); } catch { /* Private mode. */ }
+  if (kind === 'raster' && sharedSettings.language) rasterLocale = sharedSettings.language;
+  document.documentElement.dataset.appearance = sharedSettings.appearance || 'dark';
+  for (const tab of tabs) if (tab.kind !== kind) void applySettings(tab.kind);
+  render();
+}
+async function applySettings(kind) {
+  const tab = tabs.find(tab => tab.kind === kind);
+  const frame = tab && frames.get(tab.id);
+  if (!frame?.dataset.ready || settingsApplying.has(kind)) return;
+  const { language, appearance } = sharedSettings;
+  if (!language && !appearance) return;
+  const child = frame.contentWindow;
+  if (kind === 'vector' && !child.vectorcraft || kind === 'video' && !child.filmcraft) return;
+  settingsApplying.add(kind);
+  pendingSettings.set(kind, { language: kind === 'audio' ? null : language, appearance, until: Date.now() + 3000 });
+  try {
+    if (kind === 'raster' || kind === 'audio') {
+      child.postMessage({ type: 'vravio-settings:apply', language: kind === 'raster' ? language : null, appearance }, location.origin);
+    } else if (kind === 'vector' && child.vectorcraft) {
+      const values = {};
+      if (language) values.interfaceLanguage = language;
+      if (appearance) values.uiBrightness = appearance === 'light' ? 'light' : 'dark';
+      await child.vectorcraft.execute('prefs.set', { values });
+    } else if (kind === 'video' && child.filmcraft) {
+      const values = {};
+      if (language) values['general.interfaceLanguage'] = language;
+      if (appearance) values['appearance.appearanceMode'] = appearance;
+      await child.filmcraft.execute('prefs.set', { values });
+    }
+  } catch (error) { console.warn(`Could not sync ${kind} settings:`, error); }
+  finally { settingsApplying.delete(kind); }
+}
 async function pollVectorDocuments() {
   if (vectorPolling) return;
   const tab = tabs.find(tab => tab.kind === 'vector');
   const api = tab && frames.get(tab.id)?.contentWindow?.vectorcraft;
   if (!api) return;
+  const frame = frames.get(tab.id);
+  frame.dataset.ready = 'true';
   vectorPolling = true;
   try {
     const state = await api.inspect();
     setDocumentState('vector', state.documents ?? [], state.activeDocument);
+    const prefs = await api.execute('prefs.get', {});
+    reportSettings('vector', { language: prefs?.prefs?.interfaceLanguage, appearance: prefs?.prefs?.uiBrightness });
   } catch { /* The vector editor may be loading or closing. */ }
   finally { vectorPolling = false; }
 }
@@ -231,6 +311,7 @@ function openTab(kind) {
   if (existing) { chooserOpen = false; selectTab(existing.id); return; }
   const id = nextId++;
   tabs.push({ id, kind });
+  seenSettings.delete(kind);
   activeId = id;
   chooserOpen = false;
   save();
@@ -251,6 +332,8 @@ function closeTab(id) {
   if (needsConfirmation && !window.confirm(`Закрыть среду «${environments[closedKind].name}»? Несохранённые изменения в ней будут потеряны.`)) return;
   tabs.splice(index, 1);
   documentStates.delete(closedKind);
+  seenSettings.delete(closedKind);
+  pendingSettings.delete(closedKind);
   if (vectorEdit && (vectorEdit.vectorId === id || closedKind === 'raster')) vectorEdit = null;
   if (closedKind === 'raster') rasterReady = false;
   if (closedKind === 'audio') audioWelcome = true;
@@ -308,6 +391,8 @@ function render() {
       iframe.addEventListener('load', () => {
         try {
           const child = iframe.contentWindow;
+          iframe.dataset.ready = 'true';
+          void applySettings(tab.kind);
           child.open = (url, ...args) => {
             const destination = new URL(url, child.location.href);
             return destination.origin === window.location.origin ? window.open(destination.href, ...args) : null;
@@ -472,7 +557,9 @@ window.addEventListener('message', event => {
   if (message?.type === 'vravio-documents:state') {
     const sender = tabs.find(tab => frames.get(tab.id)?.contentWindow === event.source);
     if (sender && ['raster', 'audio', 'video'].includes(sender.kind)) {
+      frames.get(sender.id).dataset.ready = 'true';
       if (sender.kind === 'raster' && typeof message.language === 'string' && /^[a-z]{2,3}(?:-[a-z]+)?$/i.test(message.language)) rasterLocale = message.language;
+      reportSettings(sender.kind, { language: message.language, appearance: message.theme || message.appearance });
       setDocumentState(sender.kind, message.documents, message.activeIndex);
     }
     return;
