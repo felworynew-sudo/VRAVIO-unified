@@ -14,6 +14,10 @@ let chooserOpen = false;
 let restorerSource = null;
 let restoreCleanup = null;
 let restoreGeneration = 0;
+let rasterReady = false;
+let vectorEdit = null;
+let bridgeStatus = '';
+let crossClipboard = null;
 const bridgeToken = location.hash.match(/^#bridge=([a-f0-9]{32})$/)?.[1] || null;
 const bridge = bridgeToken && window.opener ? { token: bridgeToken, opener: window.opener, origin: null, payload: null, rasterReady: false, sent: false } : null;
 const app = document.querySelector('#app');
@@ -26,6 +30,99 @@ function deliverBridgePhoto() {
   target.postMessage({ type: 'vravio-bridge:open', name: `vravio-bridge-${bridge.token}.png`, bytes: bridge.payload }, location.origin);
   bridge.sent = true;
   bridge.payload = null;
+}
+function bytesFromBase64(value) {
+  const binary = atob(value);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+function base64FromBytes(bytes) {
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(binary);
+}
+async function asPng(bytes, name) {
+  if (name.toLowerCase().endsWith('.png') && [137, 80, 78, 71, 13, 10, 26, 10].every((v, i) => bytes[i] === v)) return bytes;
+  const bitmap = await createImageBitmap(new Blob([bytes]));
+  try {
+    const canvas = document.createElement('canvas');
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+    canvas.getContext('2d').drawImage(bitmap, 0, 0);
+    return new Uint8Array(await new Promise((resolve, reject) => canvas.toBlob(blob => blob ? blob.arrayBuffer().then(resolve, reject) : reject(new Error('Не удалось преобразовать изображение в PNG')), 'image/png')));
+  } finally { bitmap.close(); }
+}
+async function cropTransparentPng(bytes) {
+  const bitmap = await createImageBitmap(new Blob([bytes], { type: 'image/png' }));
+  try {
+    const canvas = document.createElement('canvas');
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+    const context = canvas.getContext('2d', { willReadFrequently: true });
+    context.drawImage(bitmap, 0, 0);
+    const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+    let left = canvas.width, top = canvas.height, right = -1, bottom = -1;
+    for (let y = 0; y < canvas.height; y++) for (let x = 0; x < canvas.width; x++) {
+      if (pixels[(y * canvas.width + x) * 4 + 3] === 0) continue;
+      left = Math.min(left, x); top = Math.min(top, y);
+      right = Math.max(right, x); bottom = Math.max(bottom, y);
+    }
+    if (right < left) throw new Error('Выделение не содержит видимых пикселей');
+    const cropped = document.createElement('canvas');
+    cropped.width = right - left + 1;
+    cropped.height = bottom - top + 1;
+    cropped.getContext('2d').drawImage(canvas, left, top, cropped.width, cropped.height, 0, 0, cropped.width, cropped.height);
+    return new Uint8Array(await new Promise((resolve, reject) => cropped.toBlob(blob => blob ? blob.arrayBuffer().then(resolve, reject) : reject(new Error('Не удалось скопировать выделение')), 'image/png')));
+  } finally { bitmap.close(); }
+}
+function deliverVectorImage() {
+  if (!vectorEdit?.payload || !rasterReady) return;
+  const raster = tabs.find(t => t.kind === 'raster');
+  const target = raster && frames.get(raster.id)?.contentWindow;
+  if (!target) return;
+  target.postMessage({ type: 'vravio-bridge:open', name: `vravio-bridge-${vectorEdit.token}.png`, bytes: vectorEdit.payload }, location.origin);
+  vectorEdit.payload = null;
+}
+async function editVectorImage() {
+  const vector = tabs.find(t => t.kind === 'vector');
+  const frame = vector && frames.get(vector.id);
+  const api = frame?.contentWindow?.vectorcraft;
+  if (!api) { bridgeStatus = 'Векторный редактор ещё загружается'; render(); return; }
+  try {
+    const state = await api.inspect();
+    const selected = await api.execute('links.goTo', {});
+    const image = await api.execute('links.unembed', { id: selected.id });
+    const payload = await asPng(bytesFromBase64(image.dataBase64), image.name);
+    const token = Array.from(crypto.getRandomValues(new Uint8Array(16)), x => x.toString(16).padStart(2, '0')).join('');
+    vectorEdit = { token, id: selected.id, vectorId: vector.id, documentIndex: state.activeDocument, documentTitle: state.documents?.[state.activeDocument]?.title, payload };
+    bridgeStatus = 'Изображение открывается в растре. Ctrl+S вернёт правку в вектор.';
+    rasterReady = Boolean(tabs.find(t => t.kind === 'raster') && rasterReady);
+    openTab('raster');
+    deliverVectorImage();
+  } catch (error) {
+    bridgeStatus = `Выделите встроенное изображение: ${error.message}`;
+    render();
+  }
+}
+async function returnVectorImage(message) {
+  if (!vectorEdit || message.token !== vectorEdit.token) return;
+  const raster = tabs.find(t => t.kind === 'raster');
+  if (frames.get(raster?.id)?.contentWindow !== message.source) return;
+  const vector = tabs.find(t => t.id === vectorEdit.vectorId);
+  const api = vector && frames.get(vector.id)?.contentWindow?.vectorcraft;
+  if (!api) { bridgeStatus = 'Векторная среда закрыта. Изменения остались в растровой вкладке.'; render(); return; }
+  try {
+    const bytes = message.bytes instanceof ArrayBuffer ? new Uint8Array(message.bytes) : message.bytes;
+    if (!(bytes instanceof Uint8Array) || ![137, 80, 78, 71, 13, 10, 26, 10].every((v, i) => bytes[i] === v)) throw new Error('Растровый редактор вернул некорректный PNG');
+    const state = await api.inspect();
+    if (state.activeDocument !== vectorEdit.documentIndex || state.documents?.[state.activeDocument]?.title !== vectorEdit.documentTitle) throw new Error('Сначала вернитесь к исходному векторному документу');
+    await api.execute('links.goTo', { id: vectorEdit.id });
+    const result = await api.execute('file.place', { name: 'vravio-edited.png', dataBase64: base64FromBytes(bytes), replace: true });
+    vectorEdit.id = result.ids?.[0] ?? vectorEdit.id;
+    bridgeStatus = 'Правка применена в векторном документе. Сохраните его для записи на диск.';
+    selectTab(vector.id);
+  } catch (error) { bridgeStatus = `Не удалось заменить изображение: ${error.message}`; render(); }
 }
 function announceBridge() {
   if (!bridge || bridge.origin) return;
@@ -72,7 +169,10 @@ function closeTab(id) {
   const index = tabs.findIndex(t => t.id === id);
   if (index < 0) return;
   if (!window.confirm('Закрыть рабочую среду? Сохраните документы в редакторе перед закрытием.')) return;
+  const closedKind = tabs[index].kind;
   tabs.splice(index, 1);
+  if (vectorEdit && (vectorEdit.vectorId === id || closedKind === 'raster')) vectorEdit = null;
+  if (closedKind === 'raster') rasterReady = false;
   if (activeId === id) activeId = tabs[Math.min(index, tabs.length - 1)]?.id ?? null;
   save();
   render();
@@ -90,6 +190,9 @@ function render() {
       </div>`).join('')}
       <button class="tab-add" id="add" title="Открыть рабочую среду" aria-label="Открыть рабочую среду">＋</button>`;
   if (bridge) app.querySelector('.tabs').insertAdjacentHTML('beforeend', '<span class="bridge-label" title="Ctrl+S отправит результат в сортировщик">Связано с сортировщиком · Ctrl+S для возврата</span>');
+  if (active?.kind === 'vector') app.querySelector('.tabs').insertAdjacentHTML('beforeend', '<button class="vector-edit" title="Открыть выделенное встроенное изображение в растровой среде">Редактировать изображение в растре</button>');
+  if (bridgeStatus) app.querySelector('.tabs').insertAdjacentHTML('beforeend', `<span class="bridge-status" role="status"></span>`);
+  if (bridgeStatus) app.querySelector('.bridge-status').textContent = bridgeStatus;
   const workarea = app.querySelector('.workarea');
   workarea.querySelector('.welcome')?.remove();
   if (!active) workarea.insertAdjacentHTML('beforeend', `<div class="welcome"><img src="${local('assets/logo.svg')}" alt="VRAVIO"><h1>Выберите рабочую среду</h1><p>Растр, вектор, аудио и видео в одном окне.</p><button id="welcome-new">Открыть среду</button></div>`);
@@ -129,11 +232,28 @@ function render() {
           // Keep editor shortcuts inside the app. Browsers otherwise claim
           // Ctrl+N/O/S/W before the canvas-based editors can handle them.
           child.document.addEventListener('keydown', event => {
-            if ((event.ctrlKey || event.metaKey) && ['n', 'o', 's', 'w'].includes(event.key.toLowerCase())) {
+            if (!(event.ctrlKey || event.metaKey)) return;
+            const key = event.key.toLowerCase();
+            if (tab.kind === 'vector' && key === 'c' && !event.shiftKey) {
+              const api = child.vectorcraft;
+              crossClipboard = api?.execute('document.serialize', { format: 'png', selectedOnly: true }).then(result => cropTransparentPng(bytesFromBase64(result.dataBase64))).catch(() => null) ?? null;
+            } else if (tab.kind !== 'vector' && (key === 'c' || key === 'x')) {
+              crossClipboard = null;
+            }
+            if (tab.kind === 'raster' && key === 'v' && crossClipboard) {
+              event.preventDefault();
+              event.stopImmediatePropagation();
+              void crossClipboard.then(bytes => {
+                if (!bytes) return;
+                child.postMessage({ type: 'vravio-restorer-result', mode: 'current', name: 'vector-selection.png', bytes }, location.origin);
+              });
+              return;
+            }
+            if (['n', 'o', 's', 'w'].includes(key)) {
               event.preventDefault();
             }
           }, true);
-          if (tab.id === activeId) child.focus();
+          if (tab.id === activeId) { child.focus(); child.document.querySelector('canvas[tabindex]')?.focus(); }
         } catch { /* A future cross-origin editor remains usable without this guard. */ }
       });
       frames.set(tab.id, iframe);
@@ -143,6 +263,7 @@ function render() {
     frames.get(tab.id).title = environments[tab.kind].name;
   }
   app.querySelector('#add').onclick = showChooser;
+  app.querySelector('.vector-edit')?.addEventListener('click', editVectorImage);
   app.querySelector('#welcome-new')?.addEventListener('click', showChooser);
   app.querySelector('#dismiss')?.addEventListener('click', hideChooser);
   app.querySelector('#scrim')?.addEventListener('click', e => { if (e.target.id === 'scrim') hideChooser(); });
@@ -151,7 +272,11 @@ function render() {
     el.onclick = () => selectTab(Number(el.dataset.select));
   });
   app.querySelectorAll('[data-close]').forEach(el => el.onclick = () => closeTab(Number(el.dataset.close)));
-  if (active && !chooserOpen) frames.get(active.id)?.contentWindow?.focus();
+  if (active && !chooserOpen) {
+    const child = frames.get(active.id)?.contentWindow;
+    child?.focus();
+    try { child?.document.querySelector('canvas[tabindex]')?.focus(); } catch { /* Cross-origin editor. */ }
+  }
 }
 const frames = new Map();
 function showChooser() { chooserOpen = true; render(); }
@@ -190,9 +315,13 @@ window.addEventListener('message', event => {
     return;
   }
   if (event.origin !== location.origin) return;
-  if (bridge && message?.type === 'vravio-bridge:raster-ready') {
+  if (message?.type === 'vravio-bridge:raster-ready') {
     const raster = tabs.find(t => t.kind === 'raster');
-    if (raster && frames.get(raster.id)?.contentWindow === event.source) { bridge.rasterReady = true; deliverBridgePhoto(); }
+    if (raster && frames.get(raster.id)?.contentWindow === event.source) { rasterReady = true; if (bridge) bridge.rasterReady = true; deliverBridgePhoto(); deliverVectorImage(); }
+    return;
+  }
+  if (vectorEdit && message?.type === 'vravio-bridge:saved' && message.token === vectorEdit.token) {
+    void returnVectorImage({ ...message, source: event.source });
     return;
   }
   if (bridge && message?.type === 'vravio-bridge:saved') {

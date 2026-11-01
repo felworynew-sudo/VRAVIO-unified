@@ -15,6 +15,9 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .tab-close:hover, .tab-add:hover { color: #fff; background: #343b47; }
 .tab-add { flex: 0 0 36px; }
 .bridge-label { align-self: center; margin-left: auto; padding: 0 12px; color: #b8c8e4; font-size: 12px; white-space: nowrap; }
+.vector-edit { align-self: center; margin: 3px 8px 3px auto; padding: 3px 10px; border: 1px solid #3b506e; border-radius: 5px; background: #22324b; color: #dce9ff; white-space: nowrap; font-size: 12px; }
+.vector-edit:hover { background: #304866; }
+.bridge-status { align-self: center; max-width: 390px; padding: 0 10px; color: #b8c8e4; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .workarea { position: relative; min-height: 0; background: #141415; }
 .editor-frame { position: absolute; inset: 0; display: none; }
 .editor-frame.active { display: block; }
