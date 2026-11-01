@@ -284,7 +284,7 @@ function render() {
           }, true);
           // Keep editor shortcuts inside the app. Browsers otherwise claim
           // Ctrl+N/O/S/W before the canvas-based editors can handle them.
-          child.document.addEventListener('keydown', event => {
+          child.addEventListener('keydown', event => {
             if (!(event.ctrlKey || event.metaKey)) return;
             const key = event.key.toLowerCase();
             if (tab.kind === 'vector' && key === 'c' && !event.shiftKey) {
