@@ -1,6 +1,6 @@
 # VRAVIO
 
-One workspace for raster, vector, audio and video editing. A compact strip shows documents from all four environments together. The shell uses VRAVIO branding, icons and accent colors. Each editor runs in its own embedded web frame so its engine and tools remain upstream code.
+One workspace for raster, vector, audio and video editing. A compact strip switches between the four environments; document tabs belong to each editor. The shell uses VRAVIO branding, icons and accent colors. Each editor runs in its own embedded web frame so its engine and tools remain upstream code.
 
 ## Build
 
@@ -23,7 +23,7 @@ The launcher alone can be built quickly with `npm run build:shell`, though the e
 
 ## Current integration boundary
 
-Each environment gets one live editor frame. Switching documents keeps the other frames mounted and preserves their in-memory edits. The shell shows raster and vector documents alongside the current audio session and video project; dragging a tab reorders the strip. The editors retain their native file formats. Unsaved raster documents have layered recovery snapshots in the browser, and the vector editor can send an embedded image to Raster and receive its saved result. Raster and vector exchange rendered image selections through the shared clipboard bridge. Closing an environment unloads its editor after a save reminder. The four editors do not share one document model, and theme and language changes made inside an editor do not yet propagate to the other editors. Engine diagnostics and less common screens still need a branding audit.
+Each environment gets one live editor frame. Switching environments keeps the other frames mounted and preserves their in-memory edits. Raster and vector display their native document tabs; the shell displays only environment tabs. The editors retain their native file formats. Unsaved raster documents have layered recovery snapshots in the browser, and the vector editor can send an embedded image to Raster and receive its saved result. Raster and vector exchange rendered image selections through the shared clipboard bridge. Closing an environment asks before unloading it when documents are unsaved or their state is unknown. The four editors do not share one document model, and theme and language changes made inside an editor do not yet propagate to the other editors. Engine diagnostics and less common screens still need a branding audit.
 
 In the raster editor, Filter → Restore Old Photos sends the active document to an embedded Vetor Restore dialog. The default texture, repair, face and color models are bundled in this repository and published at `models/restore/`; weights load on demand and are cached in the browser. Advanced settings can skip individual steps or choose an optional third-party face model. The result can be placed into the current document or opened in a new document with original and restored layers. Processing stays in the browser; the image is not uploaded. The restorer works on a flattened input image, so it does not preserve the original layer stack inside the result.
 
