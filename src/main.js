@@ -9,6 +9,9 @@ const environments = {
 };
 const storageKey = 'vravio-unified-workspace-v1';
 let tabs = [];
+const documentStates = new Map();
+let documentOrder = [];
+let vectorPolling = false;
 let activeId = null;
 let nextId = 1;
 let chooserOpen = false;
@@ -198,6 +201,52 @@ function load() {
 function save() {
   try { localStorage.setItem(storageKey, JSON.stringify({ tabs, activeId })); } catch { /* Private mode. */ }
 }
+function escapeText(value) {
+  return String(value).replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]);
+}
+function shownTabs() {
+  const available = [];
+  for (const tab of tabs) {
+    const state = documentStates.get(tab.kind);
+    if (state?.documents.length) {
+      state.documents.forEach((document, index) => available.push({ tab, document, index, key: `${tab.kind}:${document.id ?? index}` }));
+    } else available.push({ tab, document: null, index: -1, key: `${tab.kind}:home` });
+  }
+  const keys = new Set(available.map(item => item.key));
+  documentOrder = documentOrder.filter(key => keys.has(key));
+  for (const item of available) if (!documentOrder.includes(item.key)) documentOrder.push(item.key);
+  return available.sort((a, b) => documentOrder.indexOf(a.key) - documentOrder.indexOf(b.key));
+}
+function setDocumentState(kind, documents, activeIndex) {
+  if (!environments[kind] || !Array.isArray(documents)) return;
+  const clean = documents.slice(0, 100).map((document, index) => ({ id: document.id ?? index, name: String(document.name ?? document.title ?? `Документ ${index + 1}`).slice(0, 200), dirty: Boolean(document.dirty) }));
+  const next = { documents: clean, activeIndex: Number.isInteger(activeIndex) ? activeIndex : -1 };
+  if (JSON.stringify(documentStates.get(kind)) === JSON.stringify(next)) return;
+  if (clean.length) {
+    const home = documentOrder.indexOf(`${kind}:home`);
+    let insertAt = home >= 0 ? home : documentOrder.findLastIndex(key => key.startsWith(`${kind}:`)) + 1;
+    if (home >= 0) documentOrder.splice(home, 1);
+    for (const [index, document] of clean.entries()) {
+      const key = `${kind}:${document.id ?? index}`;
+      if (!documentOrder.includes(key)) documentOrder.splice(insertAt++, 0, key);
+    }
+  }
+  documentStates.set(kind, next);
+  render();
+}
+async function pollVectorDocuments() {
+  if (vectorPolling) return;
+  const tab = tabs.find(tab => tab.kind === 'vector');
+  const api = tab && frames.get(tab.id)?.contentWindow?.vectorcraft;
+  if (!api) return;
+  vectorPolling = true;
+  try {
+    const state = await api.inspect();
+    setDocumentState('vector', state.documents ?? [], state.activeDocument);
+  } catch { /* The vector editor may be loading or closing. */ }
+  finally { vectorPolling = false; }
+}
+setInterval(pollVectorDocuments, 1500);
 function openTab(kind) {
   if (!environments[kind]) return;
   const existing = tabs.find(t => t.kind === kind);
@@ -221,6 +270,7 @@ function closeTab(id) {
   if (!window.confirm('Закрыть рабочую среду? Сохраните документы в редакторе перед закрытием.')) return;
   const closedKind = tabs[index].kind;
   tabs.splice(index, 1);
+  documentStates.delete(closedKind);
   if (vectorEdit && (vectorEdit.vectorId === id || closedKind === 'raster')) vectorEdit = null;
   if (closedKind === 'raster') rasterReady = false;
   if (closedKind === 'audio') audioWelcome = true;
@@ -231,14 +281,19 @@ function closeTab(id) {
 function render() {
   const active = tabs.find(t => t.id === activeId);
   if (!app.querySelector('.workarea')) app.innerHTML = `
-    <nav class="tabs" aria-label="Рабочие среды"></nav>
+    <nav class="tabs" aria-label="Документы и рабочие среды"></nav>
     <main class="workarea"></main>
     <div id="modal-root"></div><div id="restorer-root"></div><div id="recovery-root"></div>`;
   app.querySelector('.tabs').innerHTML = `
-      ${tabs.map(t => `<div class="tab ${t.id === activeId ? 'selected' : ''}" style="--accent:${environments[t.kind].color}" data-id="${t.id}">
-        <button class="tab-select" data-select="${t.id}" title="${environments[t.kind].name}"><img src="${environments[t.kind].icon}" alt=""><span>${environments[t.kind].name}</span></button>
-        <button class="tab-close" data-close="${t.id}" aria-label="Закрыть среду ${environments[t.kind].name}">×</button>
-      </div>`).join('')}
+      ${shownTabs().map(item => {
+        const { tab, document, index, key } = item;
+        const selected = tab.id === activeId && (!document || documentStates.get(tab.kind)?.activeIndex === index);
+        const name = document ? document.name : environments[tab.kind].name;
+        return `<div class="tab ${selected ? 'selected' : ''}" style="--accent:${environments[tab.kind].color}" data-key="${escapeText(key)}" draggable="${document ? 'true' : 'false'}">
+          <button class="tab-select" ${document ? `data-document="${tab.kind}:${index}"` : `data-select="${tab.id}"`} title="${escapeText(name)}"><img src="${environments[tab.kind].icon}" alt=""><span>${escapeText(name)}${document?.dirty ? ' •' : ''}</span></button>
+          <button class="tab-close" ${document ? `data-close-document="${tab.kind}:${index}"` : `data-close="${tab.id}"`} aria-label="Закрыть ${document ? 'документ' : 'среду'} ${escapeText(name)}">×</button>
+        </div>`;
+      }).join('')}
       <button class="tab-add" id="add" title="Открыть рабочую среду" aria-label="Открыть рабочую среду">＋</button>`;
   if (bridge) app.querySelector('.tabs').insertAdjacentHTML('beforeend', '<span class="bridge-label" title="Ctrl+S отправит результат в сортировщик">Связано с сортировщиком · Ctrl+S для возврата</span>');
   if (active?.kind === 'vector') app.querySelector('.tabs').insertAdjacentHTML('beforeend', '<button class="vector-edit" title="Открыть выделенное встроенное изображение в растровой среде">Редактировать изображение в растре</button>');
@@ -319,6 +374,7 @@ function render() {
             }
           }, true);
           if (tab.id === activeId) { child.focus(); child.document.querySelector('canvas[tabindex]')?.focus(); }
+          if (tab.kind === 'vector') void pollVectorDocuments();
         } catch { /* A future cross-origin editor remains usable without this guard. */ }
       });
       frames.set(tab.id, iframe);
@@ -347,6 +403,46 @@ function render() {
   app.querySelectorAll('[data-create]').forEach(el => el.onclick = () => openTab(el.dataset.create));
   app.querySelectorAll('[data-select]').forEach(el => {
     el.onclick = () => selectTab(Number(el.dataset.select));
+  });
+  app.querySelectorAll('[data-document]').forEach(el => {
+    el.onclick = () => {
+      const [kind, rawIndex] = el.dataset.document.split(':');
+      const tab = tabs.find(tab => tab.kind === kind);
+      if (!tab) return;
+      selectTab(tab.id);
+      const index = Number(rawIndex);
+      if (kind === 'vector') void frames.get(tab.id)?.contentWindow?.vectorcraft?.execute('document.activate', { index }).then(pollVectorDocuments);
+      if (kind === 'raster') frames.get(tab.id)?.contentWindow?.postMessage({ type: 'vravio-documents:activate', index }, location.origin);
+    };
+  });
+  app.querySelectorAll('[data-close-document]').forEach(el => {
+    el.onclick = () => {
+      const [kind, rawIndex] = el.dataset.closeDocument.split(':');
+      const tab = tabs.find(tab => tab.kind === kind);
+      if (!tab) return;
+      const index = Number(rawIndex);
+      if (kind === 'vector') {
+        const api = frames.get(tab.id)?.contentWindow?.vectorcraft;
+        if (documentStates.get(kind)?.documents[index]?.dirty) { selectTab(tab.id); bridgeStatus = 'Сохраните векторный документ перед закрытием.'; render(); return; }
+        void api?.execute('file.close', { index }).then(pollVectorDocuments);
+      } else if (kind === 'raster') {
+        selectTab(tab.id);
+        frames.get(tab.id)?.contentWindow?.postMessage({ type: 'vravio-documents:close', index }, location.origin);
+      }
+    };
+  });
+  app.querySelectorAll('.tab[draggable="true"]').forEach(el => {
+    el.addEventListener('dragstart', event => event.dataTransfer.setData('text/plain', el.dataset.key));
+    el.addEventListener('dragover', event => event.preventDefault());
+    el.addEventListener('drop', event => {
+      event.preventDefault();
+      const from = event.dataTransfer.getData('text/plain');
+      const to = el.dataset.key;
+      if (!documentOrder.includes(from) || !documentOrder.includes(to) || from === to) return;
+      documentOrder.splice(documentOrder.indexOf(from), 1);
+      documentOrder.splice(documentOrder.indexOf(to), 0, from);
+      render();
+    });
   });
   app.querySelectorAll('[data-close]').forEach(el => el.onclick = () => closeTab(Number(el.dataset.close)));
   if (active && !chooserOpen) {
@@ -420,6 +516,11 @@ window.addEventListener('message', event => {
     if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1 || width * height > 16_000_000 || !(pixels instanceof Uint8Array) || pixels.length !== width * height * 4) return;
     crossClipboardKind = 'raster';
     crossClipboard = rgbaToPng(width, height, pixels).catch(() => null);
+    return;
+  }
+  if (message?.type === 'vravio-documents:state') {
+    const raster = tabs.find(tab => tab.kind === 'raster');
+    if (frames.get(raster?.id)?.contentWindow === event.source) setDocumentState('raster', message.documents, message.activeIndex);
     return;
   }
   if (vectorEdit && message?.type === 'vravio-bridge:saved' && message.token === vectorEdit.token) {
