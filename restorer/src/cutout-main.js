@@ -1,16 +1,20 @@
 import { cutOut } from './utils/cutout.js';
+import { translator } from './i18n.js';
 import './cutout.css';
 
 const app = document.querySelector('#cutout-app');
 let source = null, result = null, name = 'photo.png', busy = false, webgpu = false;
 let quality = 'fast';
+let t = translator();
+document.documentElement.lang = navigator.language;
+document.title = `VRAVIO · ${t('removeBackground')}`;
 
 function render() {
-  app.innerHTML = `<header><strong>Удалить фон · AI</strong><button id="close" aria-label="Закрыть">×</button></header>
-    <section class="controls"><label>Модель <select id="quality" ${busy ? 'disabled' : ''}><option value="fast" ${quality === 'fast' ? 'selected' : ''}>Быстро · MODNet (портреты)</option><option value="quality" ${quality === 'quality' ? 'selected' : ''} ${webgpu ? '' : 'disabled'}>Детальнее · BiRefNet 512 (любые объекты)</option></select></label>
-    <label>Фото <input id="file" type="file" accept="image/*" ${busy ? 'disabled' : ''}></label></section>
-    <div class="preview">${source ? `<img src="${source}" alt="До">` : '<p>Откройте фото в растровом редакторе.</p>'}${result ? `<img src="${result}" alt="Без фона">` : ''}</div>
-    <footer><span id="status">${webgpu ? 'WebGPU доступен' : 'Быстрый режим на процессоре'}</span><button id="run" ${!source || busy ? 'disabled' : ''}>Удалить фон</button>${result ? '<button id="apply">Применить маску к слою</button><button id="save">Скачать PNG</button>' : ''}</footer>`;
+  app.innerHTML = `<header><strong>${t('removeBackground')} · AI</strong><button id="close" aria-label="${t('close')}">×</button></header>
+    <section class="controls"><label>${t('model')} <select id="quality" ${busy ? 'disabled' : ''}><option value="fast" ${quality === 'fast' ? 'selected' : ''}>${t('fastModel')}</option><option value="quality" ${quality === 'quality' ? 'selected' : ''} ${webgpu ? '' : 'disabled'}>${t('qualityModel')}</option></select></label>
+    <label>${t('photo')} <input id="file" type="file" accept="image/*" ${busy ? 'disabled' : ''}></label></section>
+    <div class="preview">${source ? `<img src="${source}" alt="${t('before')}">` : `<p>${t('openRasterPhoto')}</p>`}${result ? `<img src="${result}" alt="${t('noBackground')}">` : ''}</div>
+    <footer><span id="status">${t(webgpu ? 'webgpuReady' : 'cpuFast')}</span><button id="run" ${!source || busy ? 'disabled' : ''}>${t('removeBackground')}</button>${result ? `<button id="apply">${t('applyMask')}</button><button id="save">${t('download')}</button>` : ''}</footer>`;
   app.querySelector('#close').onclick = () => parent.postMessage({ type: 'vravio-cutout-close' }, location.origin);
   app.querySelector('#quality').onchange = e => { quality = e.target.value; };
   app.querySelector('#file').onchange = async e => { const file = e.target.files?.[0]; if (file) setSource(file, file.name); };
@@ -30,17 +34,20 @@ async function run() {
   if (!source || busy) return;
   busy = true; render();
   try {
-    const canvas = await cutOut(source, quality, status => { app.querySelector('#status').textContent = status; });
+    const canvas = await cutOut(source, quality, status => { app.querySelector('#status').textContent = status; }, t);
     const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
-    if (!blob) throw new Error('Не удалось создать PNG');
+    if (!blob) throw new Error(t('pngFailed'));
     if (result) URL.revokeObjectURL(result);
-    result = URL.createObjectURL(blob); busy = false; render(); app.querySelector('#status').textContent = 'Готово';
+    result = URL.createObjectURL(blob); busy = false; render(); app.querySelector('#status').textContent = t('ready');
   } catch (error) {
-    busy = false; render(); app.querySelector('#status').textContent = `Ошибка: ${error.message}`;
+    busy = false; render(); app.querySelector('#status').textContent = `${t('error')}: ${error.message}`;
   }
 }
 window.addEventListener('message', event => {
   if (event.origin !== location.origin || event.source !== parent || event.data?.type !== 'vravio-cutout-input') return;
+  t = translator(event.data.locale);
+  document.documentElement.lang = event.data.locale || navigator.language;
+  document.title = `VRAVIO · ${t('removeBackground')}`;
   setSource(new Blob([event.data.bytes], { type: 'image/png' }), event.data.name || 'photo.png');
 });
 window.addEventListener('pagehide', () => { if (source) URL.revokeObjectURL(source); if (result) URL.revokeObjectURL(result); });

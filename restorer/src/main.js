@@ -1,8 +1,10 @@
 import { hasWebGpu, loadVetorManifest, restoreClassic, restoreVetor, toWorkCanvas, releaseAll } from './utils/photoRestore.js';
+import { translator, stageLabel } from './i18n.js';
 
-export function mountRestorer(app, { bytes, name = 'photo.png', onClose, onResult } = {}) {
+export function mountRestorer(app, { bytes, name = 'photo.png', locale, onClose, onResult } = {}) {
+  const t = translator(locale);
   let source = null, result = null, manifest = null, busy = false, stop = false;
-  let fileName = name, status = 'Подготовка моделей', progress = 0, advanced = false;
+  let fileName = name, status = t('preparingModels'), progress = 0, advanced = false;
   const settings = { texture: 'vetor', repair: 'vetor', faces: 'vetor', colorize: 'auto', upscale: 'off' };
   const option = (value, label, chosen) => `<option value="${value}" ${chosen === value ? 'selected' : ''}>${label}</option>`;
   function updateStatus(label, value = progress) {
@@ -12,27 +14,27 @@ export function mountRestorer(app, { bytes, name = 'photo.png', onClose, onResul
     if (bar) { bar.value = progress; bar.hidden = !busy && progress === 0; }
   }
   function render() {
-    app.innerHTML = `<div class="restore-panel" role="dialog" aria-modal="true" aria-label="Реставрация старых фото">
-      <header><strong>Реставрация старых фото · Vetor Restore</strong><button id="close" aria-label="Закрыть">×</button></header>
-      <section class="controls"><label>Фото <input id="file" type="file" accept="image/*" ${busy ? 'disabled' : ''}></label>
-      <button id="advanced" aria-expanded="${advanced}">Расширенные параметры ${advanced ? '▴' : '▾'}</button></section>
+    app.innerHTML = `<div class="restore-panel" role="dialog" aria-modal="true" aria-label="${t('title')}">
+      <header><strong>${t('title')} · Vetor Restore</strong><button id="close" aria-label="${t('close')}">×</button></header>
+      <section class="controls"><label>${t('photo')} <input id="file" type="file" accept="image/*" ${busy ? 'disabled' : ''}></label>
+      <button id="advanced" aria-expanded="${advanced}">${t('advanced')} ${advanced ? '▴' : '▾'}</button></section>
       ${advanced ? `<section class="advanced">
-        <label>Текстура <select data-setting="texture">${option('vetor', 'Vetor', settings.texture)}${option('off', 'Пропустить', settings.texture)}</select></label>
-        <label>Дефекты <select data-setting="repair">${option('vetor', 'Vetor + достройка', settings.repair)}${option('off', 'Пропустить', settings.repair)}</select></label>
-        <label>Лица <select data-setting="faces">${option('vetor', 'Vetor', settings.faces)}${option('third-party', 'RestoreFormer++', settings.faces)}${option('off', 'Пропустить', settings.faces)}</select></label>
-        <label>Цвет <select data-setting="colorize">${option('auto', 'Vetor · автоматически', settings.colorize)}${option('on', 'Vetor · всегда', settings.colorize)}${option('off', 'Пропустить', settings.colorize)}</select></label>
-        <label>Увеличение <select data-setting="upscale">${option('off', 'Без увеличения', settings.upscale)}${option('third-party', 'Real-ESRGAN ×4', settings.upscale)}</select></label>
+        <label>${t('texture')} <select data-setting="texture">${option('vetor', 'Vetor', settings.texture)}${option('off', t('skip'), settings.texture)}</select></label>
+        <label>${t('defects')} <select data-setting="repair">${option('vetor', t('reconstruct'), settings.repair)}${option('off', t('skip'), settings.repair)}</select></label>
+        <label>${t('faces')} <select data-setting="faces">${option('vetor', 'Vetor', settings.faces)}${option('third-party', 'RestoreFormer++', settings.faces)}${option('off', t('skip'), settings.faces)}</select></label>
+        <label>${t('color')} <select data-setting="colorize">${option('auto', t('automatic'), settings.colorize)}${option('on', t('always'), settings.colorize)}${option('off', t('skip'), settings.colorize)}</select></label>
+        <label>${t('upscale')} <select data-setting="upscale">${option('off', t('noUpscale'), settings.upscale)}${option('third-party', 'Real-ESRGAN ×4', settings.upscale)}</select></label>
       </section>` : ''}
-      <div class="preview">${source ? `<img src="${source}" alt="До">` : '<p>Откройте фото в растровом редакторе или выберите файл.</p>'}${result ? `<img src="${result}" alt="После">` : ''}</div>
+      <div class="preview">${source ? `<img src="${source}" alt="${t('before')}">` : `<p>${t('choosePhoto')}</p>`}${result ? `<img src="${result}" alt="${t('after')}">` : ''}</div>
       <footer><div class="status"><span id="status-text"></span><progress id="progress" max="100" value="0" hidden></progress></div>
-      <button id="run" ${!source || busy ? 'disabled' : ''}>Восстановить</button>${busy ? '<button id="cancel">Отменить</button>' : ''}
-      ${result ? '<button id="new-doc">В новый документ · до/после</button><button id="current-doc">В текущий документ</button><button id="save">Скачать PNG</button>' : ''}</footer></div>`;
+      <button id="run" ${!source || busy ? 'disabled' : ''}>${t('restore')}</button>${busy ? `<button id="cancel">${t('cancel')}</button>` : ''}
+      ${result ? `<button id="new-doc">${t('newDocument')}</button><button id="current-doc">${t('currentDocument')}</button><button id="save">${t('download')}</button>` : ''}</footer></div>`;
     app.querySelector('#close').onclick = () => { stop = true; onClose?.(); };
     app.querySelector('#advanced').onclick = () => { advanced = !advanced; render(); };
     app.querySelectorAll('[data-setting]').forEach(select => { select.onchange = () => { settings[select.dataset.setting] = select.value; }; });
     app.querySelector('#file').onchange = e => { const f = e.target.files?.[0]; if (f) setSource(f, f.name); };
     app.querySelector('#run').onclick = run;
-    app.querySelector('#cancel')?.addEventListener('click', () => { stop = true; updateStatus('Остановка после текущего шага'); });
+    app.querySelector('#cancel')?.addEventListener('click', () => { stop = true; updateStatus(t('stopping')); });
     for (const [id, mode] of [['new-doc', 'new'], ['current-doc', 'current']]) {
       app.querySelector(`#${id}`)?.addEventListener('click', async () => {
         const output = await (await fetch(result)).arrayBuffer();
@@ -45,7 +47,7 @@ export function mountRestorer(app, { bytes, name = 'photo.png', onClose, onResul
         originalCanvas.height = originalImage.naturalHeight;
         originalCanvas.getContext('2d').drawImage(originalImage, 0, 0);
         const originalBlob = await new Promise(resolve => originalCanvas.toBlob(resolve, 'image/png'));
-        if (!originalBlob) { updateStatus('Не удалось подготовить исходное фото'); return; }
+        if (!originalBlob) { updateStatus(t('originalFailed')); return; }
         const original = await originalBlob.arrayBuffer();
         onResult?.({ bytes: output, original, mode, name: `restored-${fileName.replace(/\.[^.]*$/, '')}.png` });
       });
@@ -57,20 +59,20 @@ export function mountRestorer(app, { bytes, name = 'photo.png', onClose, onResul
     if (source) URL.revokeObjectURL(source);
     if (result) URL.revokeObjectURL(result);
     source = URL.createObjectURL(blob); result = null; fileName = newName; progress = 0;
-    status = manifest?.status === 'ready' ? 'Модели доступны' : 'Проверка моделей'; render();
+    status = t(manifest?.status === 'ready' ? 'modelsReady' : 'checkingModels'); render();
   }
   async function run() {
     if (!source || busy) return;
-    if (manifest?.status !== 'ready') { updateStatus('Модели Vetor пока недоступны'); return; }
-    busy = true; stop = false; updateStatus('Подготовка', 0); render();
+    if (manifest?.status !== 'ready') { updateStatus(t('modelsUnavailable')); return; }
+    busy = true; stop = false; updateStatus(t('preparing'), 0); render();
     try {
       const image = new Image(); image.src = source; await image.decode();
       const { canvas, scaled } = toWorkCanvas(image, 3000);
-      if (scaled) updateStatus('Большое фото уменьшено для обработки');
+      if (scaled) updateStatus(t('largePhoto'));
       const hooks = {
-        onStage: stage => updateStatus(`Обработка: ${stage}`, 0),
-        onProgress: fraction => updateStatus(`Обработка: ${Math.round(fraction * 100)}%`, fraction * 100),
-        onDownload: (got, total) => updateStatus(total ? `Загрузка модели: ${Math.round(got / total * 100)}%` : 'Загрузка модели', total ? got / total * 100 : 0),
+        onStage: stage => updateStatus(`${t('processing')}: ${stageLabel(t, stage)}`, 0),
+        onProgress: fraction => updateStatus(`${t('processing')}: ${Math.round(fraction * 100)}%`, fraction * 100),
+        onDownload: (got, total) => updateStatus(total ? `${t('downloadingModel')}: ${Math.round(got / total * 100)}%` : t('downloadingModel'), total ? got / total * 100 : 0),
         shouldStop: () => stop,
       };
       const vetor = await restoreVetor(canvas, manifest, {
@@ -83,18 +85,18 @@ export function mountRestorer(app, { bytes, name = 'photo.png', onClose, onResul
         : vetor;
       if (stop) throw new Error('stopped');
       const blob = await new Promise(resolve => output.canvas.toBlob(resolve, 'image/png'));
-      if (!blob) throw new Error('Не удалось создать PNG');
+      if (!blob) throw new Error(t('pngFailed'));
       if (result) URL.revokeObjectURL(result);
-      result = URL.createObjectURL(blob); busy = false; status = 'Готово'; progress = 100; render();
+      result = URL.createObjectURL(blob); busy = false; status = t('ready'); progress = 100; render();
     } catch (error) {
-      busy = false; status = stop ? 'Отменено' : `Ошибка: ${error.message}`; progress = 0; render();
+      busy = false; status = stop ? t('cancelled') : `${t('error')}: ${error.message}`; progress = 0; render();
     }
   }
   if (bytes) setSource(new Blob([bytes], { type: 'image/png' }), name); else render();
   loadVetorManifest().then(value => {
     manifest = value;
-    if (!busy) updateStatus(value.status === 'ready' ? 'Модели доступны' : 'Модели Vetor недоступны');
+    if (!busy) updateStatus(t(value.status === 'ready' ? 'modelsReady' : 'modelsUnavailable'));
   });
-  hasWebGpu().then(gpu => { if (!gpu && !busy) updateStatus('Обработка на процессоре может занять дольше'); });
+  hasWebGpu().then(gpu => { if (!gpu && !busy) updateStatus(t('cpuSlow')); });
   return () => { stop = true; if (source) URL.revokeObjectURL(source); if (result) URL.revokeObjectURL(result); releaseAll(); };
 }

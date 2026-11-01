@@ -17,6 +17,7 @@ let chooserOpen = false;
 let restorerSource = null;
 let restoreCleanup = null;
 let restoreGeneration = 0;
+let rasterLocale = navigator.language || 'en';
 let rasterReady = false;
 let vectorEdit = null;
 let bridgeStatus = '';
@@ -470,7 +471,10 @@ window.addEventListener('message', event => {
   }
   if (message?.type === 'vravio-documents:state') {
     const sender = tabs.find(tab => frames.get(tab.id)?.contentWindow === event.source);
-    if (sender && ['raster', 'audio', 'video'].includes(sender.kind)) setDocumentState(sender.kind, message.documents, message.activeIndex);
+    if (sender && ['raster', 'audio', 'video'].includes(sender.kind)) {
+      if (sender.kind === 'raster' && typeof message.language === 'string' && /^[a-z]{2,3}(?:-[a-z]+)?$/i.test(message.language)) rasterLocale = message.language;
+      setDocumentState(sender.kind, message.documents, message.activeIndex);
+    }
     return;
   }
   if (vectorEdit && message?.type === 'vravio-bridge:saved' && message.token === vectorEdit.token) {
@@ -492,25 +496,26 @@ window.addEventListener('message', event => {
     closeRestorer();
     restorerSource = event.source;
     const generation = restoreGeneration;
-    root.innerHTML = `<div class="restore-scrim"><button class="restore-dismiss" aria-label="Закрыть окно" title="Закрыть">×</button>${cutout ? '<iframe title="Удалить фон"></iframe>' : `<div id="restore-app" data-base="${local('restorer/')}"><div class="restore-loading">Открываем реставрацию…</div></div>`}</div>`;
+    const russian = rasterLocale.toLowerCase().startsWith('ru');
+    root.innerHTML = `<div class="restore-scrim"><button class="restore-dismiss" aria-label="${russian ? 'Закрыть окно' : 'Close dialog'}" title="${russian ? 'Закрыть' : 'Close'}">×</button>${cutout ? `<iframe title="${russian ? 'Удалить фон' : 'Remove background'}"></iframe>` : `<div id="restore-app" data-base="${local('restorer/')}"><div class="restore-loading">${russian ? 'Открываем реставрацию…' : 'Opening restoration…'}</div></div>`}</div>`;
     root.querySelector('.restore-dismiss').onclick = closeRestorer;
     root.querySelector('.restore-scrim').addEventListener('click', e => { if (e.target.classList.contains('restore-scrim')) closeRestorer(); });
     if (cutout) {
       const frame = root.querySelector('iframe');
-      frame.onload = () => frame.contentWindow.postMessage({ type: 'vravio-cutout-input', bytes: message.bytes, name: 'photo.png' }, location.origin);
+      frame.onload = () => frame.contentWindow.postMessage({ type: 'vravio-cutout-input', bytes: message.bytes, name: 'photo.png', locale: rasterLocale }, location.origin);
       frame.src = local('restorer/cutout/');
     } else {
       import(local('restorer/embedded.js')).then(() => {
         if (generation !== restoreGeneration) return;
         restoreCleanup = window.__vravioMountRestorer(root.querySelector('#restore-app'), {
-          bytes: message.bytes, name: 'photo.png', onClose: closeRestorer,
+          bytes: message.bytes, name: 'photo.png', locale: rasterLocale, onClose: closeRestorer,
           onResult: ({ bytes, original, mode, name }) => {
             restorerSource?.postMessage({ type: 'vravio-restorer-result', bytes, original, mode, name }, location.origin, [bytes, original]);
             closeRestorer();
           },
         });
       }).catch(error => {
-        if (generation === restoreGeneration) root.querySelector('#restore-app').textContent = `Не удалось открыть реставрацию: ${error.message}`;
+        if (generation === restoreGeneration) root.querySelector('#restore-app').textContent = `${russian ? 'Не удалось открыть реставрацию' : 'Could not open restoration'}: ${error.message}`;
       });
     }
     return;

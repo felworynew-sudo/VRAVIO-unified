@@ -23,13 +23,13 @@ async function load(spec, progress) {
   return cache.get(spec.id);
 }
 
-export async function cutOut(imageUrl, quality, progress = () => {}) {
+export async function cutOut(imageUrl, quality, progress = () => {}, t = key => key) {
   const spec = CUTOUT_MODELS[quality] || CUTOUT_MODELS.fast;
-  progress('Загрузка модели…');
+  progress(`${t('downloadingModel')}…`);
   const { model, processor, RawImage } = await load(spec, info => {
-    if (info?.status === 'progress' && info.total) progress(`Загрузка модели: ${Math.round(info.loaded / info.total * 100)}%`);
+    if (info?.status === 'progress' && info.total) progress(`${t('downloadingModel')}: ${Math.round(info.loaded / info.total * 100)}%`);
   });
-  progress('Построение маски…');
+  progress(`${t('buildingMask')}…`);
   const image = await RawImage.fromURL(imageUrl);
   const { pixel_values } = await processor(image);
   const output = await model({ [spec.input]: pixel_values });
@@ -44,7 +44,7 @@ export async function cutOut(imageUrl, quality, progress = () => {}) {
 
   // Edge-aware refinement follows the source luminance, retaining semi-transparent
   // strands instead of thresholding them into a hard silhouette.
-  progress('Уточнение волос и краёв…');
+  progress(`${t('refiningEdges')}…`);
   const bitmap = await createImageBitmap(await (await fetch(imageUrl)).blob());
   const source = document.createElement('canvas'); source.width = w; source.height = h;
   source.getContext('2d').drawImage(bitmap, 0, 0); bitmap.close();

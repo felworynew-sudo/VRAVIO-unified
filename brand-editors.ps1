@@ -431,7 +431,7 @@ $tabStateMethod = @'
         let documents: Vec<_> = self.app.session.documents().iter().map(|state| serde_json::json!({
             "id": state.doc.id.0.to_string(), "name": state.doc.name, "dirty": state.is_dirty()
         })).collect();
-        let payload = serde_json::json!({"type": "vravio-documents:state", "documents": documents, "activeIndex": self.app.session.active_index()});
+        let payload = serde_json::json!({"type": "vravio-documents:state", "documents": documents, "activeIndex": self.app.session.active_index(), "language": photocraft_ui_egui::i18n::current().code()});
         let next = payload.to_string();
         if next == self.tab_state { return; }
         if send_document_tabs(&next).is_ok() { self.tab_state = next; }
