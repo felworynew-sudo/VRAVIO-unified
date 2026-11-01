@@ -245,8 +245,9 @@ function closeTab(id) {
   const index = tabs.findIndex(t => t.id === id);
   if (index < 0) return;
   const closedKind = tabs[index].kind;
-  const dirty = documentStates.get(closedKind)?.documents.some(document => document.dirty);
-  if (dirty && !window.confirm(`В среде «${environments[closedKind].name}» есть несохранённые документы. Закрыть среду без сохранения?`)) return;
+  const state = documentStates.get(closedKind);
+  const needsConfirmation = !state || state.documents.some(document => document.dirty);
+  if (needsConfirmation && !window.confirm(`Закрыть среду «${environments[closedKind].name}»? Несохранённые изменения в ней будут потеряны.`)) return;
   tabs.splice(index, 1);
   documentStates.delete(closedKind);
   if (vectorEdit && (vectorEdit.vectorId === id || closedKind === 'raster')) vectorEdit = null;
@@ -414,7 +415,7 @@ document.addEventListener('keydown', event => {
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'w' && activeId !== null && !chooserOpen) { event.preventDefault(); closeTab(activeId); }
 });
 window.addEventListener('beforeunload', event => {
-  if (!tabs.some(tab => documentStates.get(tab.kind)?.documents.some(document => document.dirty))) return;
+  if (!tabs.length) return;
   event.preventDefault();
   event.returnValue = '';
 });
