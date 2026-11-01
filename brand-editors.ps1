@@ -421,7 +421,7 @@ Replace-Exact 'upstream/photocraft/apps/photocraft-web/Cargo.toml' 'log = { work
 Replace-Exact 'upstream/photocraft/apps/photocraft-web/Cargo.toml' "[dev-dependencies]`nserde_json = { workspace = true }" '[dev-dependencies]'
 Replace-Exact $rasterWeb 'fn listen_restore_result(inbox: Inbox, cutout_inbox: CutoutInbox, restore_inbox: RestoreInbox, place_inbox: Inbox, snapshot_requested: Arc<AtomicBool>, ctx: egui::Context)' 'fn listen_restore_result(inbox: Inbox, cutout_inbox: CutoutInbox, restore_inbox: RestoreInbox, place_inbox: Inbox, snapshot_requested: Arc<AtomicBool>, tab_action: TabAction, ctx: egui::Context)'
 Replace-Exact $rasterWeb 'type RestoreInbox = Arc<Mutex<Vec<(String, Vec<u8>, Vec<u8>)>>>;' "type RestoreInbox = Arc<Mutex<Vec<(String, Vec<u8>, Vec<u8>)>>>;`ntype TabAction = Arc<Mutex<Option<(String, usize)>>>;"
-Insert-After-Once $rasterWeb '                    PhotocraftApp::setup_context(&cc.egui_ctx, ThemeKind::Studio);' 'vravio-unified-tabs' '                    cc.egui_ctx.data_mut(|data| data.insert_temp(egui::Id::new("vravio-unified-tabs"), true));'
+Replace-Exact $rasterWeb '                    cc.egui_ctx.data_mut(|data| data.insert_temp(egui::Id::new("vravio-unified-tabs"), true));' ''
 Insert-Before-Once $rasterWeb '                    notify_bridge_ready();' 'let tab_action: TabAction' '                    let tab_action: TabAction = Arc::default();'
 Replace-Exact $rasterWeb 'listen_restore_result(inbox.clone(), cutout_inbox.clone(), restore_inbox.clone(), place_inbox.clone(), snapshot_requested.clone(), cc.egui_ctx.clone());' 'listen_restore_result(inbox.clone(), cutout_inbox.clone(), restore_inbox.clone(), place_inbox.clone(), snapshot_requested.clone(), tab_action.clone(), cc.egui_ctx.clone());'
 Replace-Exact $rasterWeb 'place_inbox, snapshot_requested, snapshot_revisions: HashMap::new(), unsaved' 'place_inbox, snapshot_requested, snapshot_revisions: HashMap::new(), tab_action, tab_state: String::new(), unsaved'
@@ -480,9 +480,9 @@ $tabActionMethod = @'
 '@
 Insert-Before-Once $rasterWeb '    fn save_presets(&mut self, ctx: &egui::Context) {' 'fn apply_tab_action(&mut self)' $tabActionMethod
 Insert-Before-Once $rasterWeb '        self.app.logic_frame(ctx, frame);' 'self.apply_tab_action();' '        self.apply_tab_action();'
-Replace-Exact 'upstream/photocraft/crates/ui-egui/src/canvas/tabs.rs' 'if !app.ui.view.hides_tabs() || opening {' 'if (!app.ui.view.hides_tabs() || opening) && !ui.ctx().data(|data| data.get_temp::<bool>(egui::Id::new("vravio-unified-tabs")).unwrap_or(false)) {'
-Insert-After-Once 'upstream/vectorcraft/apps/vectorcraft-web/src/web.rs' '                let ctx = &cc.egui_ctx;' 'vravio-unified-tabs' '                ctx.data_mut(|data| data.insert_temp(egui::Id::new("vravio-unified-tabs"), true));'
-Replace-Exact 'upstream/vectorcraft/crates/ui-egui/src/app.rs' 'if self.ui.screen_mode < 3 {' 'if self.ui.screen_mode < 3 && !ui.ctx().data(|data| data.get_temp::<bool>(egui::Id::new("vravio-unified-tabs")).unwrap_or(false)) {'
+Replace-Exact 'upstream/photocraft/crates/ui-egui/src/canvas/tabs.rs' 'if (!app.ui.view.hides_tabs() || opening) && !ui.ctx().data(|data| data.get_temp::<bool>(egui::Id::new("vravio-unified-tabs")).unwrap_or(false)) {' 'if !app.ui.view.hides_tabs() || opening {'
+Replace-Exact 'upstream/vectorcraft/apps/vectorcraft-web/src/web.rs' '                ctx.data_mut(|data| data.insert_temp(egui::Id::new("vravio-unified-tabs"), true));' ''
+Replace-Exact 'upstream/vectorcraft/crates/ui-egui/src/app.rs' 'if self.ui.screen_mode < 3 && !ui.ctx().data(|data| data.get_temp::<bool>(egui::Id::new("vravio-unified-tabs")).unwrap_or(false)) {' 'if self.ui.screen_mode < 3 {'
 
 # A sound session and a video project are single documents. Publish their live
 # name/dirty state to the same shell strip used by raster and vector documents.

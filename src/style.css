@@ -2,18 +2,22 @@
 * { box-sizing: border-box; }
 html, body, #app { margin: 0; width: 100%; height: 100%; overflow: hidden; }
 button { font: inherit; color: inherit; cursor: pointer; }
-#app { display: grid; grid-template-rows: 38px minmax(0, 1fr); }
+#app { display: grid; grid-template-rows: 32px minmax(0, 1fr); }
 #welcome-new { border: 1px solid #404754; background: #2a303a; border-radius: 7px; padding: 6px 12px; }
 #welcome-new:hover { border-color: #84a8ff; background: #313949; }
-.tabs { display: flex; align-items: stretch; min-width: 0; overflow-x: auto; background: #1d1d1f; border-bottom: 1px solid #303034; scrollbar-width: thin; }
-.tab { flex: 0 0 170px; display: flex; min-width: 0; border-right: 1px solid #303034; border-top: 2px solid transparent; color: #929baa; }
-.tab.selected { background: #141415; border-top-color: var(--accent); color: #ececf0; }
-.tab-select { flex: 1; display: flex; align-items: center; gap: 8px; min-width: 0; padding: 0 10px; border: 0; background: none; text-align: left; }
+.tabs { display: flex; align-items: stretch; min-width: 0; overflow-x: auto; background: #19191c; border-bottom: 1px solid #343439; scrollbar-width: thin; }
+.tab { position: relative; flex: 0 0 auto; display: flex; min-width: 108px; max-width: 150px; margin: 3px 0 0 4px; border: 1px solid transparent; border-bottom: 0; border-radius: 6px 6px 0 0; color: #a1a3ad; }
+.tab:hover { background: #27272b; color: #e4e4e9; }
+.tab.selected { background: #29292e; border-color: #3c3c43; color: #f3f3f5; }
+.tab.selected::after { content: ''; position: absolute; bottom: 0; left: 8px; right: 8px; height: 2px; border-radius: 2px; background: var(--accent); }
+.tab-select { flex: 1; display: flex; align-items: center; gap: 7px; min-width: 0; padding: 0 2px 0 9px; border: 0; background: none; text-align: left; font-size: 12px; }
 .tab-select span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.tab-select img { width: 20px; height: 20px; object-fit: contain; }
-.tab-close, .tab-add { border: 0; background: transparent; color: #929baa; font-size: 20px; padding: 0 9px; }
-.tab-close:hover, .tab-add:hover { color: #fff; background: #343b47; }
-.tab-add { flex: 0 0 36px; }
+.tab-select img { width: 16px; height: 16px; object-fit: contain; }
+.tab-dirty { flex: 0 0 5px; width: 5px; height: 5px; border-radius: 50%; background: var(--accent); }
+.tab-close, .tab-add { border: 0; background: transparent; color: #8c8d96; font-size: 17px; }
+.tab-close { width: 24px; margin: 2px 3px 3px 0; padding: 0; border-radius: 4px; }
+.tab-close:hover, .tab-add:hover { color: #fff; background: #3b3b42; }
+.tab-add { flex: 0 0 30px; margin: 3px 2px; padding: 0; border-radius: 5px; }
 .bridge-label { align-self: center; margin-left: auto; padding: 0 12px; color: #b8c8e4; font-size: 12px; white-space: nowrap; }
 .bridge-status { position: absolute; z-index: 5; bottom: 18px; left: 50%; transform: translateX(-50%); max-width: min(520px, 90%); padding: 9px 14px; border: 1px solid #414957; border-radius: 6px; background: #20242cee; box-shadow: 0 8px 24px #0009; color: #dce6f8; font-size: 12px; text-align: center; pointer-events: none; }
 .workarea { position: relative; min-height: 0; background: #141415; }
@@ -52,7 +56,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .choice { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; min-height: 120px; background: #2a303a; border: 1px solid #414957; border-radius: 9px; }
 .choice:hover, .choice:focus-visible { border-color: var(--accent); background: #343b47; outline: none; }
 .choice img { width: 50px; height: 50px; object-fit: contain; }
-@media(max-width: 620px) { .choices { grid-template-columns: repeat(2, 1fr); } .tab { flex-basis: 145px; } }
+@media(max-width: 620px) { .choices { grid-template-columns: repeat(2, 1fr); } .tab { min-width: 94px; } }
 .restore-scrim { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; padding: 24px; background: #050506ce; }
 .restore-scrim iframe { width: min(1000px, 100%); height: min(740px, 100%); border: 1px solid #45454a; border-radius: 9px; background: #141415; box-shadow: 0 24px 80px #000c; }
 .restore-dismiss { position: absolute; top: 8px; right: 10px; z-index: 2; border: 0; background: #29292c; border-radius: 6px; color: #ececf0; font-size: 24px; width: 38px; height: 38px; }

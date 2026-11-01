@@ -10,7 +10,6 @@ const environments = {
 const storageKey = 'vravio-unified-workspace-v1';
 let tabs = [];
 const documentStates = new Map();
-let documentOrder = [];
 let vectorPolling = false;
 let activeId = null;
 let nextId = 1;
@@ -204,33 +203,11 @@ function save() {
 function escapeText(value) {
   return String(value).replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]);
 }
-function shownTabs() {
-  const available = [];
-  for (const tab of tabs) {
-    const state = documentStates.get(tab.kind);
-    if (state?.documents.length) {
-      state.documents.forEach((document, index) => available.push({ tab, document, index, key: `${tab.kind}:${document.id ?? index}` }));
-    } else available.push({ tab, document: null, index: -1, key: `${tab.kind}:home` });
-  }
-  const keys = new Set(available.map(item => item.key));
-  documentOrder = documentOrder.filter(key => keys.has(key));
-  for (const item of available) if (!documentOrder.includes(item.key)) documentOrder.push(item.key);
-  return available.sort((a, b) => documentOrder.indexOf(a.key) - documentOrder.indexOf(b.key));
-}
 function setDocumentState(kind, documents, activeIndex) {
   if (!environments[kind] || !Array.isArray(documents)) return;
   const clean = documents.slice(0, 100).map((document, index) => ({ id: document.id ?? index, name: String(document.name ?? document.title ?? `Документ ${index + 1}`).slice(0, 200), dirty: Boolean(document.dirty) }));
   const next = { documents: clean, activeIndex: Number.isInteger(activeIndex) ? activeIndex : -1 };
   if (JSON.stringify(documentStates.get(kind)) === JSON.stringify(next)) return;
-  if (clean.length) {
-    const home = documentOrder.indexOf(`${kind}:home`);
-    let insertAt = home >= 0 ? home : documentOrder.findLastIndex(key => key.startsWith(`${kind}:`)) + 1;
-    if (home >= 0) documentOrder.splice(home, 1);
-    for (const [index, document] of clean.entries()) {
-      const key = `${kind}:${document.id ?? index}`;
-      if (!documentOrder.includes(key)) documentOrder.splice(insertAt++, 0, key);
-    }
-  }
   documentStates.set(kind, next);
   render();
 }
@@ -267,8 +244,9 @@ function selectTab(id) {
 function closeTab(id) {
   const index = tabs.findIndex(t => t.id === id);
   if (index < 0) return;
-  if (!window.confirm('Закрыть рабочую среду? Сохраните документы в редакторе перед закрытием.')) return;
   const closedKind = tabs[index].kind;
+  const dirty = documentStates.get(closedKind)?.documents.some(document => document.dirty);
+  if (dirty && !window.confirm(`В среде «${environments[closedKind].name}» есть несохранённые документы. Закрыть среду без сохранения?`)) return;
   tabs.splice(index, 1);
   documentStates.delete(closedKind);
   if (vectorEdit && (vectorEdit.vectorId === id || closedKind === 'raster')) vectorEdit = null;
@@ -281,17 +259,16 @@ function closeTab(id) {
 function render() {
   const active = tabs.find(t => t.id === activeId);
   if (!app.querySelector('.workarea')) app.innerHTML = `
-    <nav class="tabs" aria-label="Документы и рабочие среды"></nav>
+    <nav class="tabs" aria-label="Рабочие среды"></nav>
     <main class="workarea"></main>
     <div id="modal-root"></div><div id="restorer-root"></div><div id="recovery-root"></div>`;
   app.querySelector('.tabs').innerHTML = `
-      ${shownTabs().map(item => {
-        const { tab, document, index, key } = item;
-        const selected = tab.id === activeId && (!document || documentStates.get(tab.kind)?.activeIndex === index);
-        const name = document ? document.name : environments[tab.kind].name;
-        return `<div class="tab ${selected ? 'selected' : ''}" style="--accent:${environments[tab.kind].color}" data-key="${escapeText(key)}" draggable="${document ? 'true' : 'false'}">
-          <button class="tab-select" ${document ? `data-document="${tab.kind}:${index}"` : `data-select="${tab.id}"`} title="${escapeText(environments[tab.kind].name)}: ${escapeText(name)}" aria-label="${escapeText(environments[tab.kind].name)}: ${escapeText(name)}"><img src="${environments[tab.kind].icon}" alt=""><span>${escapeText(name)}${document?.dirty ? ' •' : ''}</span></button>
-          <button class="tab-close" ${document ? `data-close-document="${tab.kind}:${index}"` : `data-close="${tab.id}"`} aria-label="Закрыть ${document ? 'документ' : 'среду'} ${escapeText(name)}">×</button>
+      ${tabs.map(tab => {
+        const dirty = documentStates.get(tab.kind)?.documents.some(document => document.dirty);
+        const name = environments[tab.kind].name;
+        return `<div class="tab ${tab.id === activeId ? 'selected' : ''}" style="--accent:${environments[tab.kind].color}">
+          <button class="tab-select" data-select="${tab.id}" title="${escapeText(name)}" aria-label="Среда ${escapeText(name)}"><img src="${environments[tab.kind].icon}" alt=""><span>${escapeText(name)}</span>${dirty ? '<span class="tab-dirty" aria-label="Есть несохранённые документы"></span>' : ''}</button>
+          <button class="tab-close" data-close="${tab.id}" aria-label="Закрыть среду ${escapeText(name)}">×</button>
         </div>`;
       }).join('')}
       <button class="tab-add" id="add" title="Открыть рабочую среду" aria-label="Открыть рабочую среду">＋</button>`;
@@ -411,49 +388,6 @@ function render() {
   app.querySelectorAll('[data-select]').forEach(el => {
     el.onclick = () => selectTab(Number(el.dataset.select));
   });
-  app.querySelectorAll('[data-document]').forEach(el => {
-    el.onclick = () => {
-      const [kind, rawIndex] = el.dataset.document.split(':');
-      const tab = tabs.find(tab => tab.kind === kind);
-      if (!tab) return;
-      selectTab(tab.id);
-      const index = Number(rawIndex);
-      if (kind === 'vector') void frames.get(tab.id)?.contentWindow?.vectorcraft?.execute('document.activate', { index }).then(pollVectorDocuments);
-      if (kind === 'raster') frames.get(tab.id)?.contentWindow?.postMessage({ type: 'vravio-documents:activate', index }, location.origin);
-    };
-  });
-  app.querySelectorAll('[data-close-document]').forEach(el => {
-    el.onclick = () => {
-      const [kind, rawIndex] = el.dataset.closeDocument.split(':');
-      const tab = tabs.find(tab => tab.kind === kind);
-      if (!tab) return;
-      const index = Number(rawIndex);
-      if (kind === 'vector') {
-        const api = frames.get(tab.id)?.contentWindow?.vectorcraft;
-        if (documentStates.get(kind)?.documents[index]?.dirty) { selectTab(tab.id); bridgeStatus = 'Сохраните векторный документ перед закрытием.'; render(); return; }
-        void api?.execute('file.close', { index }).then(pollVectorDocuments);
-      } else if (kind === 'raster') {
-        selectTab(tab.id);
-        frames.get(tab.id)?.contentWindow?.postMessage({ type: 'vravio-documents:close', index }, location.origin);
-      } else {
-        // Audio and video each own one project.
-        closeTab(tab.id);
-      }
-    };
-  });
-  app.querySelectorAll('.tab[draggable="true"]').forEach(el => {
-    el.addEventListener('dragstart', event => event.dataTransfer.setData('text/plain', el.dataset.key));
-    el.addEventListener('dragover', event => event.preventDefault());
-    el.addEventListener('drop', event => {
-      event.preventDefault();
-      const from = event.dataTransfer.getData('text/plain');
-      const to = el.dataset.key;
-      if (!documentOrder.includes(from) || !documentOrder.includes(to) || from === to) return;
-      documentOrder.splice(documentOrder.indexOf(from), 1);
-      documentOrder.splice(documentOrder.indexOf(to), 0, from);
-      render();
-    });
-  });
   app.querySelectorAll('[data-close]').forEach(el => el.onclick = () => closeTab(Number(el.dataset.close)));
   if (active && !chooserOpen) {
     const child = frames.get(active.id)?.contentWindow;
@@ -480,7 +414,7 @@ document.addEventListener('keydown', event => {
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'w' && activeId !== null && !chooserOpen) { event.preventDefault(); closeTab(activeId); }
 });
 window.addEventListener('beforeunload', event => {
-  if (!tabs.length) return;
+  if (!tabs.some(tab => documentStates.get(tab.kind)?.documents.some(document => document.dirty))) return;
   event.preventDefault();
   event.returnValue = '';
 });
