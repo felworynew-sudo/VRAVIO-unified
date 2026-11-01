@@ -72,7 +72,7 @@ export function mountRestorer(app, { bytes, name = 'photo.png', locale, onClose,
       const hooks = {
         onStage: stage => updateStatus(`${t('processing')}: ${stageLabel(t, stage)}`, 0),
         onProgress: fraction => updateStatus(`${t('processing')}: ${Math.round(fraction * 100)}%`, fraction * 100),
-        onDownload: (got, total) => updateStatus(total ? `${t('downloadingModel')}: ${Math.round(got / total * 100)}%` : t('downloadingModel'), total ? got / total * 100 : 0),
+        onDownload: (got, total) => updateStatus(total ? `${t('downloadingModel')}: ${Math.min(100, Math.round(got / total * 100))}%` : t('downloadingModel'), total ? got / total * 100 : 0),
         shouldStop: () => stop,
       };
       const vetor = await restoreVetor(canvas, manifest, {

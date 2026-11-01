@@ -5,8 +5,9 @@ import './cutout.css';
 const app = document.querySelector('#cutout-app');
 let source = null, result = null, name = 'photo.png', busy = false, webgpu = false;
 let quality = 'fast';
-let t = translator();
-document.documentElement.lang = navigator.language;
+const initialLocale = new URLSearchParams(location.search).get('lang') || navigator.language;
+let t = translator(initialLocale);
+document.documentElement.lang = initialLocale;
 document.title = `VRAVIO · ${t('removeBackground')}`;
 
 function render() {

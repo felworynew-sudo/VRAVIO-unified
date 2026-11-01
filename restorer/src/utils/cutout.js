@@ -27,7 +27,7 @@ export async function cutOut(imageUrl, quality, progress = () => {}, t = key => 
   const spec = CUTOUT_MODELS[quality] || CUTOUT_MODELS.fast;
   progress(`${t('downloadingModel')}…`);
   const { model, processor, RawImage } = await load(spec, info => {
-    if (info?.status === 'progress' && info.total) progress(`${t('downloadingModel')}: ${Math.round(info.loaded / info.total * 100)}%`);
+    if (info?.status === 'progress' && info.total) progress(`${t('downloadingModel')}: ${Math.min(100, Math.round(info.loaded / info.total * 100))}%`);
   });
   progress(`${t('buildingMask')}…`);
   const image = await RawImage.fromURL(imageUrl);
