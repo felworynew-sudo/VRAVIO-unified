@@ -18,6 +18,7 @@ let rasterReady = false;
 let vectorEdit = null;
 let bridgeStatus = '';
 let crossClipboard = null;
+let audioWelcome = true;
 const bridgeToken = location.hash.match(/^#bridge=([a-f0-9]{32})$/)?.[1] || null;
 const bridge = bridgeToken && window.opener ? { token: bridgeToken, opener: window.opener, origin: null, payload: null, rasterReady: false, sent: false } : null;
 const app = document.querySelector('#app');
@@ -173,6 +174,7 @@ function closeTab(id) {
   tabs.splice(index, 1);
   if (vectorEdit && (vectorEdit.vectorId === id || closedKind === 'raster')) vectorEdit = null;
   if (closedKind === 'raster') rasterReady = false;
+  if (closedKind === 'audio') audioWelcome = true;
   if (activeId === id) activeId = tabs[Math.min(index, tabs.length - 1)]?.id ?? null;
   save();
   render();
@@ -195,6 +197,7 @@ function render() {
   if (bridgeStatus) app.querySelector('.bridge-status').textContent = bridgeStatus;
   const workarea = app.querySelector('.workarea');
   workarea.querySelector('.welcome')?.remove();
+  workarea.querySelector('.audio-welcome')?.remove();
   if (!active) workarea.insertAdjacentHTML('beforeend', `<div class="welcome"><img src="${local('assets/logo.svg')}" alt="VRAVIO"><h1>Выберите рабочую среду</h1><p>Растр, вектор, аудио и видео в одном окне.</p><button id="welcome-new">Открыть среду</button></div>`);
   const modal = app.querySelector('#modal-root');
   modal.innerHTML = chooserOpen ? `<div class="scrim" id="scrim"><div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dialog-title"><div class="dialog-head"><h2 id="dialog-title">Открыть рабочую среду</h2><button id="dismiss" aria-label="Закрыть">×</button></div><p>Документы создаются внутри выбранного редактора.</p><div class="choices">${Object.entries(environments).map(([key, e]) => `<button class="choice" data-create="${key}" style="--accent:${e.color}"><img src="${e.icon}" alt=""><span>${e.name}</span></button>`).join('')}</div></div></div>` : '';
@@ -225,6 +228,7 @@ function render() {
             return destination.origin === window.location.origin ? window.open(destination.href, ...args) : null;
           };
           child.document.addEventListener('click', event => {
+            if (tab.kind === 'audio' && audioWelcome) { audioWelcome = false; app.querySelector('.audio-welcome')?.remove(); }
             const link = event.target.closest?.('a[href]');
             if (!link || link.hasAttribute('download') || link.href.startsWith('blob:')) return;
             if (new URL(link.href).origin !== window.location.origin) event.preventDefault();
@@ -263,6 +267,18 @@ function render() {
     frames.get(tab.id).title = environments[tab.kind].name;
   }
   app.querySelector('#add').onclick = showChooser;
+  if (active?.kind === 'audio' && audioWelcome) {
+    workarea.insertAdjacentHTML('beforeend', `<div class="audio-welcome"><h1>VRAVIO</h1><p>Начните работу со звуком: создайте сессию или откройте существующую.</p><div><button data-audio-action="n">Новая сессия…</button><button data-audio-action="o">Открыть…</button></div></div>`);
+    workarea.querySelectorAll('[data-audio-action]').forEach(button => button.onclick = () => {
+      const key = button.dataset.audioAction;
+      const child = frames.get(active.id)?.contentWindow;
+      const canvas = child?.document.querySelector('canvas[tabindex]');
+      audioWelcome = false;
+      workarea.querySelector('.audio-welcome')?.remove();
+      canvas?.focus();
+      canvas?.dispatchEvent(new KeyboardEvent('keydown', { key, code: `Key${key.toUpperCase()}`, ctrlKey: true, bubbles: true, cancelable: true }));
+    });
+  }
   app.querySelector('.vector-edit')?.addEventListener('click', editVectorImage);
   app.querySelector('#welcome-new')?.addEventListener('click', showChooser);
   app.querySelector('#dismiss')?.addEventListener('click', hideChooser);

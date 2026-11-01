@@ -26,6 +26,13 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .welcome img { width: 245px; height: 90px; object-fit: contain; }
 .welcome h1 { font-size: 26px; margin: 20px 0 0; }
 .welcome p { color: #929baa; margin: 10px 0 25px; }
+.audio-welcome { position: absolute; inset: 0; z-index: 2; display: flex; flex-direction: column; align-items: center; justify-content: center; background: #141415; text-align: center; }
+.audio-welcome h1 { margin: 0; font-size: 42px; letter-spacing: -.04em; }
+.audio-welcome p { margin: 16px 20px 32px; color: #a4a8b1; }
+.audio-welcome > div { display: flex; gap: 12px; }
+.audio-welcome button { min-width: 170px; padding: 10px 16px; border: 1px solid #41454d; border-radius: 7px; background: #25262a; }
+.audio-welcome button:first-child { background: #f4f4f6; border-color: #f4f4f6; color: #161619; font-weight: 600; }
+.audio-welcome button:hover { border-color: #ffb600; }
 .scrim { position: fixed; inset: 0; display: grid; place-items: center; z-index: 10; background: #06080cba; padding: 20px; }
 #modal-root { display: contents; }
 .dialog { width: min(620px, 100%); padding: 22px; background: #20242c; border: 1px solid #414957; box-shadow: 0 20px 80px #000b; border-radius: 12px; }
