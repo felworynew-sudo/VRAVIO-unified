@@ -1,10 +1,10 @@
 # VRAVIO
 
-One workspace for raster, vector, audio and video editing. A compact strip switches between the four environments; each environment keeps its own document tabs and editing state. The shell uses VRAVIO branding, icons and accent colors. Each editor currently runs in its own embedded web frame so its engine and tools remain upstream code.
+One workspace for raster, vector, audio and video editing. A compact strip shows documents from all four environments together. The shell uses VRAVIO branding, icons and accent colors. Each editor runs in its own embedded web frame so its engine and tools remain upstream code.
 
 ## Build
 
-Requires Rust 1.95+, `wasm32-unknown-unknown`, [Trunk](https://trunkrs.dev/), and `wasm-bindgen-cli` 0.2.129 for the video editor. Clone with `git clone --recurse-submodules` or run `git submodule update --init --recursive`.
+Requires Rust 1.95+, `wasm32-unknown-unknown`, [Trunk](https://trunkrs.dev/), PowerShell 7 (`pwsh`), and `wasm-bindgen-cli` 0.2.129 for the video editor. Clone with `git clone --recurse-submodules` or run `git submodule update --init --recursive`.
 
 On Windows:
 
@@ -13,21 +13,21 @@ rustup target add wasm32-unknown-unknown
 cargo install trunk --locked
 cargo install wasm-bindgen-cli --version 0.2.129 --locked
 npm ci
-.\build-web.ps1
+pwsh -File .\build-web.ps1
 python -m http.server 8080 --directory dist
 ```
 
 Open `http://localhost:8080/`. To build a Windows desktop installer, install Node.js and the [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/), then run `npm install` and `npm run build:desktop`.
 
-The launcher alone can be built quickly with `.\build-web.ps1 -ShellOnly`, though the editor frames require the full build.
+The launcher alone can be built quickly with `npm run build:shell`, though the editor frames require the full build.
 
 ## Current integration boundary
 
-Each environment gets one live editor frame. The launcher preserves it while changing environments and restores the environment strip after restart; the editors retain their own internal document tabs and file formats. Opening an environment already in the shell selects that frame. Closing an environment unloads its editor after a save reminder. Refreshing the page with an open environment triggers a browser warning, but unsaved raster work is not automatically restored after a reload. A single cross-environment document tab strip, cross-environment copy/paste, and one shared document model are not implemented yet. Language and theme changes made inside one editor do not yet propagate to the others. The build-time branding pass changes the main UI labels, accent tokens and visible community links; engine diagnostics and less common screens still need a branding audit.
+Each environment gets one live editor frame. Switching documents keeps the other frames mounted and preserves their in-memory edits. The shell shows raster and vector documents alongside the current audio session and video project; dragging a tab reorders the strip. The editors retain their native file formats. Unsaved raster documents have layered recovery snapshots in the browser, and the vector editor can send an embedded image to Raster and receive its saved result. Raster and vector exchange rendered image selections through the shared clipboard bridge. Closing an environment unloads its editor after a save reminder. The four editors do not share one document model, and theme and language changes made inside an editor do not yet propagate to the other editors. Engine diagnostics and less common screens still need a branding audit.
 
 In the raster editor, Filter → Restore Old Photos sends the active document to an embedded Vetor Restore dialog. The default texture, repair, face and color models are bundled in this repository and published at `models/restore/`; weights load on demand and are cached in the browser. Advanced settings can skip individual steps or choose an optional third-party face model. The result can be placed into the current document or opened in a new document with original and restored layers. Processing stays in the browser; the image is not uploaded. The restorer works on a flattened input image, so it does not preserve the original layer stack inside the result.
 
-The four sources are Git submodules pinned to specific commits. Their MIT/Apache-2.0 license texts and notices are copied into `dist/third-party-notices/` for distribution. VRAVIO's launcher is separate code; `brand-editors.ps1` makes UI-only changes in the local build checkout without changing the pinned upstream commits.
+The four sources are Git submodules pinned to specific commits. Their MIT/Apache-2.0 license texts and notices are copied into `dist/third-party-notices/` for distribution. VRAVIO's launcher is separate code; `brand-editors.ps1` applies branding and integration patches in the local build checkout without changing the pinned upstream commits.
 
 ## Return-to-source bridge
 
