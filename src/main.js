@@ -296,7 +296,6 @@ function render() {
       }).join('')}
       <button class="tab-add" id="add" title="Открыть рабочую среду" aria-label="Открыть рабочую среду">＋</button>`;
   if (bridge) app.querySelector('.tabs').insertAdjacentHTML('beforeend', '<span class="bridge-label" title="Ctrl+S отправит результат в сортировщик">Связано с сортировщиком · Ctrl+S для возврата</span>');
-  if (active?.kind === 'vector') app.querySelector('.tabs').insertAdjacentHTML('beforeend', '<button class="vector-edit" title="Открыть выделенное встроенное изображение в растровой среде">Редактировать изображение в растре</button>');
   if (bridgeStatus) app.querySelector('.tabs').insertAdjacentHTML('beforeend', `<span class="bridge-status" role="status"></span>`);
   if (bridgeStatus) app.querySelector('.bridge-status').textContent = bridgeStatus;
   const workarea = app.querySelector('.workarea');
@@ -396,7 +395,6 @@ function render() {
       canvas?.dispatchEvent(new KeyboardEvent('keydown', { key, code: `Key${key.toUpperCase()}`, ctrlKey: true, bubbles: true, cancelable: true }));
     });
   }
-  app.querySelector('.vector-edit')?.addEventListener('click', editVectorImage);
   app.querySelector('#welcome-new')?.addEventListener('click', showChooser);
   app.querySelector('#dismiss')?.addEventListener('click', hideChooser);
   app.querySelector('#scrim')?.addEventListener('click', e => { if (e.target.id === 'scrim') hideChooser(); });
@@ -489,6 +487,11 @@ window.addEventListener('message', event => {
     return;
   }
   if (event.origin !== location.origin) return;
+  if (message?.type === 'vravio-vector:edit-in-raster') {
+    const vector = tabs.find(t => t.kind === 'vector');
+    if (frames.get(vector?.id)?.contentWindow === event.source) void editVectorImage();
+    return;
+  }
   if (message?.type === 'vravio-bridge:raster-ready') {
     const raster = tabs.find(t => t.kind === 'raster');
     if (raster && frames.get(raster.id)?.contentWindow === event.source) {

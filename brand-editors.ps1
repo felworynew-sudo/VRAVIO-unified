@@ -481,6 +481,55 @@ Insert-Before-Once $rasterWeb '        self.app.logic_frame(ctx, frame);' 'self.
 Replace-Exact 'upstream/photocraft/crates/ui-egui/src/canvas/tabs.rs' 'if !app.ui.view.hides_tabs() || opening {' 'if (!app.ui.view.hides_tabs() || opening) && !ui.ctx().data(|data| data.get_temp::<bool>(egui::Id::new("vravio-unified-tabs")).unwrap_or(false)) {'
 Insert-After-Once 'upstream/vectorcraft/apps/vectorcraft-web/src/web.rs' '                let ctx = &cc.egui_ctx;' 'vravio-unified-tabs' '                ctx.data_mut(|data| data.insert_temp(egui::Id::new("vravio-unified-tabs"), true));'
 Replace-Exact 'upstream/vectorcraft/crates/ui-egui/src/app.rs' 'if self.ui.screen_mode < 3 {' 'if self.ui.screen_mode < 3 && !ui.ctx().data(|data| data.get_temp::<bool>(egui::Id::new("vravio-unified-tabs")).unwrap_or(false)) {'
+
+# An embedded raster image can be opened in the raster editor from its own context
+# menu or the Properties panel. The web host forwards this request to the unified
+# shell; the Rust UI remains independent of browser APIs and desktop builds work.
+$vectorContext = 'upstream/vectorcraft/crates/ui-egui/src/menus/context.rs'
+Insert-Before-Once $vectorContext '        v.extend([c("Make Guides", "view.guides.make"), Sep, sub("Transform", transform_items())]);' 'vravio.editInRaster' @'
+        if matches!(roots.as_slice(), [node] if matches!(&node.kind, NodeKind::Image(image) if image.link.is_none())) {
+            v.extend([Sep, c("Edit in Raster", "vravio.editInRaster")]);
+        }
+'@
+Replace-Exact 'upstream/vectorcraft/crates/ui-egui/src/menus/state.rs' '    match id {
+        // Save is off for a clean document that already has its own file.' '    match id {
+        "vravio.editInRaster" => selected_image(app, |image| image.link.is_none()),
+        // Save is off for a clean document that already has its own file.'
+$vectorCanvasContext = 'upstream/vectorcraft/crates/ui-egui/src/canvas/context.rs'
+Replace-Exact $vectorCanvasContext '        crate::menus::invoke(app, &id, p);' '        if id == "vravio.editInRaster" {
+            resp.ctx.data_mut(|data| data.insert_temp(egui::Id::new("vravio-edit-in-raster"), true));
+        } else {
+            crate::menus::invoke(app, &id, p);
+        }'
+$vectorProps = 'upstream/vectorcraft/crates/ui-egui/src/panels/properties.rs'
+Insert-After-Once $vectorProps '        crate::panels::image_trace::trace_button(app, ui, ui.available_width());' 'vravio-edit-in-raster' @'
+        if crate::menus::enabled(app, "vravio.editInRaster")
+            && widgets::flat_button(ui, tl!("Edit in Raster"), ui.available_width()).clicked()
+        {
+            ui.ctx().data_mut(|data| data.insert_temp(egui::Id::new("vravio-edit-in-raster"), true));
+        }
+'@
+Replace-Exact $vectorProps 'widgets::flat_button(ui, "Редактировать в растре", ui.available_width())' 'widgets::flat_button(ui, tl!("Edit in Raster"), ui.available_width())'
+$vectorWeb = 'upstream/vectorcraft/apps/vectorcraft-web/src/web.rs'
+Insert-After-Once $vectorWeb '            app.ui(ui);' 'vravio-edit-in-raster' @'
+            if ctx.data(|data| data.get_temp::<bool>(egui::Id::new("vravio-edit-in-raster")).unwrap_or(false)) {
+                ctx.data_mut(|data| data.insert_temp(egui::Id::new("vravio-edit-in-raster"), false));
+                if let Some(window) = web_sys::window() {
+                    if let Ok(parent) = js_sys::Reflect::get(window.as_ref(), &"parent".into()) {
+                        if let Ok(post) = js_sys::Reflect::get(&parent, &"postMessage".into()) {
+                            if let Ok(post) = post.dyn_into::<js_sys::Function>() {
+                                let message = js_sys::Object::new();
+                                let _ = js_sys::Reflect::set(&message, &"type".into(), &"vravio-vector:edit-in-raster".into());
+                                if let Ok(origin) = window.location().origin() {
+                                    let _ = post.call2(&parent, &message, &origin.into());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+'@
+Insert-After-Once 'upstream/vectorcraft/crates/ui-egui/src/i18n/ru.tsv' "`tEdit Original`tРедактировать оригинал" "`tEdit in Raster`tРедактировать в растре" "`tEdit in Raster`tРедактировать в растре"
 $clipboardSender = @'
 fn send_clipboard_image(width: u32, height: u32, pixels: &[u8]) -> Result<(), String> {
     let js = |e: wasm_bindgen::JsValue| format!("{e:?}");
