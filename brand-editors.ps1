@@ -202,7 +202,7 @@ fn send_restore_input(path: &str, bytes: &[u8]) -> Result<(), String> {
     Ok(())
 }
 
-fn listen_restore_result(inbox: Inbox, cutout_inbox: CutoutInbox, restore_inbox: RestoreInbox, place_inbox: Inbox, ctx: egui::Context) {
+fn listen_restore_result(inbox: Inbox, cutout_inbox: CutoutInbox, restore_inbox: RestoreInbox, place_inbox: Inbox, snapshot_requested: Arc<AtomicBool>, ctx: egui::Context) {
     use wasm_bindgen::closure::Closure;
     let Some(window) = web_sys::window() else { return };
     let cb = Closure::<dyn FnMut(web_sys::MessageEvent)>::new(move |event: web_sys::MessageEvent| {
@@ -242,7 +242,6 @@ fn listen_restore_result(inbox: Inbox, cutout_inbox: CutoutInbox, restore_inbox:
 }
 '@
 Insert-Before-Once 'upstream/photocraft/apps/photocraft-web/src/web.rs' '/// Trigger a browser download of `bytes` named after the last component of `path`.' 'fn send_restore_input(' $restoreBridge
-Replace-Exact 'upstream/photocraft/apps/photocraft-web/src/web.rs' 'fn listen_restore_result(inbox: Inbox, ctx: egui::Context)' 'fn listen_restore_result(inbox: Inbox, cutout_inbox: CutoutInbox, restore_inbox: RestoreInbox, place_inbox: Inbox, snapshot_requested: Arc<AtomicBool>, ctx: egui::Context)'
 Replace-Exact 'upstream/photocraft/apps/photocraft-web/src/web.rs' 'if js_sys::Reflect::get(&data, &"type".into()).ok().and_then(|v| v.as_string()).as_deref() != Some("vravio-restorer-result") { return }' 'let kind = js_sys::Reflect::get(&data, &"type".into()).ok().and_then(|v| v.as_string());'
 Insert-Before-Once 'upstream/photocraft/apps/photocraft-web/src/web.rs' '        let bytes = js_sys::Uint8Array::new(&js_sys::Reflect::get(&data, &"bytes".into()).unwrap_or_default()).to_vec();' 'if !matches!(kind.as_deref()' '        if !matches!(kind.as_deref(), Some("vravio-restorer-result" | "vravio-cutout-result")) { return }'
 Insert-Before-Once 'upstream/photocraft/apps/photocraft-web/src/web.rs' '        let name = js_sys::Reflect::get(&data, &"name".into())' 'cutout_inbox.lock().unwrap_or_else' "        if kind.as_deref() == Some(`"vravio-cutout-result`") {`n            cutout_inbox.lock().unwrap_or_else(PoisonError::into_inner).push(bytes);`n            ctx.request_repaint();`n            return;`n        }"
@@ -420,7 +419,7 @@ foreach ($line in @(
 $rasterWeb = 'upstream/photocraft/apps/photocraft-web/src/web.rs'
 Insert-Before-Once $rasterWeb '                    notify_bridge_ready();' 'let snapshot_requested = Arc::new(AtomicBool::new(false));' '                    let snapshot_requested = Arc::new(AtomicBool::new(false));'
 Replace-Exact $rasterWeb 'listen_restore_result(inbox.clone(), cutout_inbox.clone(), restore_inbox.clone(), place_inbox.clone(), cc.egui_ctx.clone());' 'listen_restore_result(inbox.clone(), cutout_inbox.clone(), restore_inbox.clone(), place_inbox.clone(), snapshot_requested.clone(), cc.egui_ctx.clone());'
-Insert-After-Once $rasterWeb '    restore_inbox: RestoreInbox,' 'snapshot_requested: Arc<AtomicBool>' "    snapshot_requested: Arc<AtomicBool>,`n    snapshot_revisions: HashMap<u64, u64>,"
+Insert-After-Once $rasterWeb '    restore_inbox: RestoreInbox,' '    snapshot_revisions: HashMap<u64, u64>,' "    snapshot_requested: Arc<AtomicBool>,`n    snapshot_revisions: HashMap<u64, u64>,"
 $snapshotMethod = @'
     fn snapshot_dirty(&mut self) {
         if !self.snapshot_requested.swap(false, Ordering::Relaxed) { return; }
