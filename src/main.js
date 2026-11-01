@@ -426,6 +426,9 @@ function render() {
       } else if (kind === 'raster') {
         selectTab(tab.id);
         frames.get(tab.id)?.contentWindow?.postMessage({ type: 'vravio-documents:close', index }, location.origin);
+      } else {
+        // Audio and video each own one project.
+        closeTab(tab.id);
       }
     };
   });
@@ -522,8 +525,8 @@ window.addEventListener('message', event => {
     return;
   }
   if (message?.type === 'vravio-documents:state') {
-    const raster = tabs.find(tab => tab.kind === 'raster');
-    if (frames.get(raster?.id)?.contentWindow === event.source) setDocumentState('raster', message.documents, message.activeIndex);
+    const sender = tabs.find(tab => frames.get(tab.id)?.contentWindow === event.source);
+    if (sender && ['raster', 'audio', 'video'].includes(sender.kind)) setDocumentState(sender.kind, message.documents, message.activeIndex);
     return;
   }
   if (vectorEdit && message?.type === 'vravio-bridge:saved' && message.token === vectorEdit.token) {

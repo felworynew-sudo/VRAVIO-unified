@@ -484,6 +484,64 @@ Replace-Exact 'upstream/photocraft/crates/ui-egui/src/canvas/tabs.rs' 'if !app.u
 Insert-After-Once 'upstream/vectorcraft/apps/vectorcraft-web/src/web.rs' '                let ctx = &cc.egui_ctx;' 'vravio-unified-tabs' '                ctx.data_mut(|data| data.insert_temp(egui::Id::new("vravio-unified-tabs"), true));'
 Replace-Exact 'upstream/vectorcraft/crates/ui-egui/src/app.rs' 'if self.ui.screen_mode < 3 {' 'if self.ui.screen_mode < 3 && !ui.ctx().data(|data| data.get_temp::<bool>(egui::Id::new("vravio-unified-tabs")).unwrap_or(false)) {'
 
+# A sound session and a video project are single documents. Publish their live
+# name/dirty state to the same shell strip used by raster and vector documents.
+$audioWeb = 'upstream/soundcraft/apps/soundcraft-web/src/web.rs'
+Insert-After-Once $audioWeb '    samples: SampleInbox,' 'tab_state: String,' '    tab_state: String,'
+Replace-Exact $audioWeb 'WebShell { app, inbox: Rc::default(), samples: Rc::default() }' 'WebShell { app, inbox: Rc::default(), samples: Rc::default(), tab_state: String::new() }'
+$audioTabSender = @'
+fn vravio_send_tab(payload: &str) -> Result<(), String> {
+    let window = web_sys::window().ok_or("no window")?;
+    let parent = js_sys::Reflect::get(window.as_ref(), &"parent".into()).map_err(|e| format!("{e:?}"))?;
+    let post = js_sys::Reflect::get(&parent, &"postMessage".into()).map_err(|e| format!("{e:?}"))?
+        .dyn_into::<js_sys::Function>().map_err(|_| "no postMessage")?;
+    let message = js_sys::JSON::parse(payload).map_err(|e| format!("{e:?}"))?;
+    post.call2(&parent, &message, &window.location().origin().map_err(|e| format!("{e:?}"))?.into())
+        .map_err(|e| format!("{e:?}"))?;
+    Ok(())
+}
+'@
+Insert-Before-Once $audioWeb 'const CANVAS_ID:' 'fn vravio_send_tab(' $audioTabSender
+$audioTabMethod = @'
+    fn vravio_sync_tab(&mut self) {
+        let session = self.app.engine.session();
+        let payload = serde_json::json!({"type":"vravio-documents:state","documents":[{
+            "id":"session", "name":session.name, "dirty":self.app.engine.is_dirty()
+        }], "activeIndex":0}).to_string();
+        if payload != self.tab_state && vravio_send_tab(&payload).is_ok() { self.tab_state = payload; }
+    }
+'@
+Insert-Before-Once $audioWeb '    /// File > Open Session…' 'fn vravio_sync_tab(&mut self)' $audioTabMethod
+Insert-After-Once $audioWeb '        self.app.ui(ui);' 'self.vravio_sync_tab();' '        self.vravio_sync_tab();'
+
+$videoWeb = 'upstream/filmcraft/apps/filmcraft-web/src/lib.rs'
+Insert-After-Once $videoWeb '    pub autosave: recovery::Autosave,' 'tab_state: String,' '    tab_state: String,'
+Replace-Exact $videoWeb 'WebApp { app, audio, autosave: recovery::Autosave::default() }' 'WebApp { app, audio, autosave: recovery::Autosave::default(), tab_state: String::new() }'
+$videoTabSender = @'
+fn vravio_send_tab(payload: &str) -> Result<(), String> {
+    use wasm_bindgen::JsCast as _;
+    let window = web_sys::window().ok_or("no window")?;
+    let parent = js_sys::Reflect::get(window.as_ref(), &"parent".into()).map_err(|e| format!("{e:?}"))?;
+    let post = js_sys::Reflect::get(&parent, &"postMessage".into()).map_err(|e| format!("{e:?}"))?
+        .dyn_into::<js_sys::Function>().map_err(|_| "no postMessage")?;
+    let message = js_sys::JSON::parse(payload).map_err(|e| format!("{e:?}"))?;
+    post.call2(&parent, &message, &window.location().origin().map_err(|e| format!("{e:?}"))?.into())
+        .map_err(|e| format!("{e:?}"))?;
+    Ok(())
+}
+'@
+Insert-Before-Once $videoWeb '/// The eframe app:' 'fn vravio_send_tab(' $videoTabSender
+$videoTabMethod = @'
+    fn vravio_sync_tab(&mut self) {
+        let payload = serde_json::json!({"type":"vravio-documents:state","documents":[{
+            "id":"project", "name":self.app.session.project.name, "dirty":self.app.session.is_dirty()
+        }], "activeIndex":0}).to_string();
+        if payload != self.tab_state && vravio_send_tab(&payload).is_ok() { self.tab_state = payload; }
+    }
+'@
+Insert-Before-Once $videoWeb 'impl eframe::App for WebApp {' 'fn vravio_sync_tab(&mut self)' ('impl WebApp {' + "`n" + $videoTabMethod + "`n}")
+Insert-After-Once $videoWeb '        self.app.ui(ui, frame);' 'self.vravio_sync_tab();' '        self.vravio_sync_tab();'
+
 # An embedded raster image can be opened in the raster editor from its own context
 # menu or the Properties panel. The web host forwards this request to the unified
 # shell; the Rust UI remains independent of browser APIs and desktop builds work.
