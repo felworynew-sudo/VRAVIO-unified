@@ -215,6 +215,10 @@ function save() {
 function escapeText(value) {
   return String(value).replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]);
 }
+function uiText(ru, en) { return (sharedSettings.language || rasterLocale).toLowerCase().startsWith('ru') ? ru : en; }
+function environmentName(kind) {
+  return uiText(environments[kind].name, { raster: 'Raster', vector: 'Vector', audio: 'Audio', video: 'Video' }[kind]);
+}
 function setDocumentState(kind, documents, activeIndex) {
   if (!environments[kind] || !Array.isArray(documents)) return;
   const clean = documents.slice(0, 100).map((document, index) => ({ id: document.id ?? index, name: String(document.name ?? document.title ?? `Документ ${index + 1}`).slice(0, 200), dirty: Boolean(document.dirty) }));
@@ -329,7 +333,7 @@ function closeTab(id) {
   const closedKind = tabs[index].kind;
   const state = documentStates.get(closedKind);
   const needsConfirmation = !state || state.documents.some(document => document.dirty);
-  if (needsConfirmation && !window.confirm(`Закрыть среду «${environments[closedKind].name}»? Несохранённые изменения в ней будут потеряны.`)) return;
+  if (needsConfirmation && !window.confirm(uiText(`Закрыть среду «${environmentName(closedKind)}»? Несохранённые изменения в ней будут потеряны.`, `Close the ${environmentName(closedKind)} workspace? Unsaved changes will be lost.`))) return;
   tabs.splice(index, 1);
   documentStates.delete(closedKind);
   seenSettings.delete(closedKind);
@@ -344,19 +348,19 @@ function closeTab(id) {
 function render() {
   const active = tabs.find(t => t.id === activeId);
   if (!app.querySelector('.workarea')) app.innerHTML = `
-    <nav class="tabs" aria-label="Рабочие среды"></nav>
+    <nav class="tabs" aria-label="Workspaces"></nav>
     <main class="workarea"></main>
     <div id="modal-root"></div><div id="restorer-root"></div><div id="recovery-root"></div>`;
   app.querySelector('.tabs').innerHTML = `
       ${tabs.map(tab => {
         const dirty = documentStates.get(tab.kind)?.documents.some(document => document.dirty);
-        const name = environments[tab.kind].name;
+        const name = environmentName(tab.kind);
         return `<div class="tab ${tab.id === activeId ? 'selected' : ''}" style="--accent:${environments[tab.kind].color}">
-          <button class="tab-select" data-select="${tab.id}" title="${escapeText(name)}" aria-label="Среда ${escapeText(name)}"><img src="${environments[tab.kind].icon}" alt=""><span>${escapeText(name)}</span>${dirty ? '<span class="tab-dirty" aria-label="Есть несохранённые документы"></span>' : ''}</button>
-          <button class="tab-close" data-close="${tab.id}" aria-label="Закрыть среду ${escapeText(name)}">×</button>
+          <button class="tab-select" data-select="${tab.id}" title="${escapeText(name)}" aria-label="${uiText('Среда', 'Workspace')} ${escapeText(name)}"><img src="${environments[tab.kind].icon}" alt=""><span>${escapeText(name)}</span>${dirty ? `<span class="tab-dirty" aria-label="${uiText('Есть несохранённые документы', 'Unsaved documents')}"></span>` : ''}</button>
+          <button class="tab-close" data-close="${tab.id}" aria-label="${uiText('Закрыть среду', 'Close workspace')} ${escapeText(name)}">×</button>
         </div>`;
       }).join('')}
-      <button class="tab-add" id="add" title="Открыть рабочую среду" aria-label="Открыть рабочую среду">＋</button>`;
+      <button class="tab-add" id="add" title="${uiText('Открыть рабочую среду', 'Open workspace')}" aria-label="${uiText('Открыть рабочую среду', 'Open workspace')}">＋</button>`;
   if (bridge) app.querySelector('.tabs').insertAdjacentHTML('beforeend', '<span class="bridge-label" title="Ctrl+S отправит результат в сортировщик">Связано с сортировщиком · Ctrl+S для возврата</span>');
   const workarea = app.querySelector('.workarea');
   workarea.querySelector('.bridge-status')?.remove();
@@ -366,9 +370,9 @@ function render() {
   }
   workarea.querySelector('.welcome')?.remove();
   workarea.querySelector('.audio-welcome')?.remove();
-  if (!active) workarea.insertAdjacentHTML('beforeend', `<div class="welcome"><img src="${local('assets/logo.svg')}" alt="VRAVIO"><h1>Выберите рабочую среду</h1><p>Растр, вектор, аудио и видео в одном окне.</p><button id="welcome-new">Открыть среду</button></div>`);
+  if (!active) workarea.insertAdjacentHTML('beforeend', `<div class="welcome"><img src="${local('assets/logo.svg')}" alt="VRAVIO"><h1>${uiText('Выберите рабочую среду', 'Choose a workspace')}</h1><p>${uiText('Растр, вектор, аудио и видео в одном окне.', 'Raster, vector, audio and video in one window.')}</p><button id="welcome-new">${uiText('Открыть среду', 'Open workspace')}</button></div>`);
   const modal = app.querySelector('#modal-root');
-  modal.innerHTML = chooserOpen ? `<div class="scrim" id="scrim"><div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dialog-title"><div class="dialog-head"><h2 id="dialog-title">Открыть рабочую среду</h2><button id="dismiss" aria-label="Закрыть">×</button></div><p>Документы создаются внутри выбранного редактора.</p><div class="choices">${Object.entries(environments).map(([key, e]) => `<button class="choice" data-create="${key}" style="--accent:${e.color}"><img src="${e.icon}" alt=""><span>${e.name}</span></button>`).join('')}</div></div></div>` : '';
+  modal.innerHTML = chooserOpen ? `<div class="scrim" id="scrim"><div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dialog-title"><div class="dialog-head"><h2 id="dialog-title">${uiText('Открыть рабочую среду', 'Open workspace')}</h2><button id="dismiss" aria-label="${uiText('Закрыть', 'Close')}">×</button></div><p>${uiText('Документы создаются внутри выбранного редактора.', 'Create documents inside the selected editor.')}</p><div class="choices">${Object.entries(environments).map(([key, e]) => `<button class="choice" data-create="${key}" style="--accent:${e.color}"><img src="${e.icon}" alt=""><span>${environmentName(key)}</span></button>`).join('')}</div></div></div>` : '';
   for (const holder of workarea.querySelectorAll('[data-frame]')) {
     const id = Number(holder.dataset.frame);
     if (!tabs.some(t => t.id === id)) { holder.remove(); frames.delete(id); }
@@ -381,11 +385,11 @@ function render() {
       holder = document.createElement('section');
       holder.className = `editor-frame ${tab.id === activeId ? 'active' : ''}`;
       holder.dataset.frame = String(tab.id);
-      holder.setAttribute('aria-label', environments[tab.kind].name);
+      holder.setAttribute('aria-label', environmentName(tab.kind));
       workarea.append(holder);
       const iframe = document.createElement('iframe');
       iframe.src = environments[tab.kind].path;
-      iframe.title = environments[tab.kind].name;
+      iframe.title = environmentName(tab.kind);
       iframe.allow = 'fullscreen; clipboard-read; clipboard-write; microphone';
       iframe.setAttribute('loading', tab.id === activeId ? 'eager' : 'lazy');
       iframe.addEventListener('load', () => {
@@ -457,7 +461,7 @@ function render() {
   }
   app.querySelector('#add').onclick = showChooser;
   if (active?.kind === 'audio' && audioWelcome) {
-    workarea.insertAdjacentHTML('beforeend', `<div class="audio-welcome"><h1>VRAVIO</h1><p>Начните работу со звуком: создайте сессию или откройте существующую.</p><div><button data-audio-action="n">Новая сессия…</button><button data-audio-action="o">Открыть…</button></div></div>`);
+    workarea.insertAdjacentHTML('beforeend', `<div class="audio-welcome"><h1>VRAVIO</h1><p>${uiText('Начните работу со звуком: создайте сессию или откройте существующую.', 'Create a new audio session or open an existing one.')}</p><div><button data-audio-action="n">${uiText('Новая сессия…', 'New session…')}</button><button data-audio-action="o">${uiText('Открыть…', 'Open…')}</button></div></div>`);
     workarea.querySelectorAll('[data-audio-action]').forEach(button => button.onclick = () => {
       const key = button.dataset.audioAction;
       const child = frames.get(active.id)?.contentWindow;
