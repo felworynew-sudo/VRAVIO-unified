@@ -16,7 +16,7 @@ export function mountRestorer(app, { bytes, name = 'photo.png', locale, onClose,
   function render() {
     app.innerHTML = `<div class="restore-panel" role="dialog" aria-modal="true" aria-label="${t('title')}">
       <header><strong>${t('title')} · Vetor Restore</strong><button id="close" aria-label="${t('close')}">×</button></header>
-      <section class="controls"><label>${t('photo')} <input id="file" type="file" accept="image/*" ${busy ? 'disabled' : ''}></label>
+      <section class="controls"><label for="file">${t('photo')}</label><button id="file-button" type="button" ${busy ? 'disabled' : ''}>${t('chooseFile')}</button><input id="file" type="file" accept="image/*" hidden><span id="file-name" class="file-name"></span>
       <button id="advanced" aria-expanded="${advanced}">${t('advanced')} ${advanced ? '▴' : '▾'}</button></section>
       ${advanced ? `<section class="advanced">
         <label>${t('texture')} <select data-setting="texture">${option('vetor', 'Vetor', settings.texture)}${option('off', t('skip'), settings.texture)}</select></label>
@@ -31,6 +31,8 @@ export function mountRestorer(app, { bytes, name = 'photo.png', locale, onClose,
       ${result ? `<button id="new-doc">${t('newDocument')}</button><button id="current-doc">${t('currentDocument')}</button><button id="save">${t('download')}</button>` : ''}</footer></div>`;
     app.querySelector('#close').onclick = () => { stop = true; onClose?.(); };
     app.querySelector('#advanced').onclick = () => { advanced = !advanced; render(); };
+    app.querySelector('#file-button').onclick = () => app.querySelector('#file').click();
+    app.querySelector('#file-name').textContent = source ? fileName : t('noFile');
     app.querySelectorAll('[data-setting]').forEach(select => { select.onchange = () => { settings[select.dataset.setting] = select.value; }; });
     app.querySelector('#file').onchange = e => { const f = e.target.files?.[0]; if (f) setSource(f, f.name); };
     app.querySelector('#run').onclick = run;

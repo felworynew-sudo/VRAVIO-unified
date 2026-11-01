@@ -13,11 +13,13 @@ document.title = `VRAVIO · ${t('removeBackground')}`;
 function render() {
   app.innerHTML = `<header><strong>${t('removeBackground')} · AI</strong><button id="close" aria-label="${t('close')}">×</button></header>
     <section class="controls"><label>${t('model')} <select id="quality" ${busy ? 'disabled' : ''}><option value="fast" ${quality === 'fast' ? 'selected' : ''}>${t('fastModel')}</option><option value="quality" ${quality === 'quality' ? 'selected' : ''} ${webgpu ? '' : 'disabled'}>${t('qualityModel')}</option></select></label>
-    <label>${t('photo')} <input id="file" type="file" accept="image/*" ${busy ? 'disabled' : ''}></label></section>
+    <label for="file">${t('photo')}</label><button id="file-button" type="button" ${busy ? 'disabled' : ''}>${t('chooseFile')}</button><input id="file" type="file" accept="image/*" hidden><span id="file-name" class="file-name"></span></section>
     <div class="preview">${source ? `<img src="${source}" alt="${t('before')}">` : `<p>${t('openRasterPhoto')}</p>`}${result ? `<img src="${result}" alt="${t('noBackground')}">` : ''}</div>
     <footer><span id="status">${t(webgpu ? 'webgpuReady' : 'cpuFast')}</span><button id="run" ${!source || busy ? 'disabled' : ''}>${t('removeBackground')}</button>${result ? `<button id="apply">${t('applyMask')}</button><button id="save">${t('download')}</button>` : ''}</footer>`;
   app.querySelector('#close').onclick = () => parent.postMessage({ type: 'vravio-cutout-close' }, location.origin);
   app.querySelector('#quality').onchange = e => { quality = e.target.value; };
+  app.querySelector('#file-button').onclick = () => app.querySelector('#file').click();
+  app.querySelector('#file-name').textContent = source ? name : t('noFile');
   app.querySelector('#file').onchange = async e => { const file = e.target.files?.[0]; if (file) setSource(file, file.name); };
   app.querySelector('#run').onclick = run;
   app.querySelector('#apply')?.addEventListener('click', async () => {
