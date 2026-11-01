@@ -443,7 +443,7 @@ $rasterSettingsListener = @'
 fn listen_unified_settings(settings: UnifiedSettings, ctx: egui::Context) {
     use wasm_bindgen::closure::Closure;
     let Some(window) = web_sys::window() else { return };
-    let cb = Closure::<dyn FnMut(web_sys::MessageEvent)>::new(move |event| {
+    let cb = Closure::<dyn FnMut(web_sys::MessageEvent)>::new(move |event: web_sys::MessageEvent| {
         let Some(window) = web_sys::window() else { return };
         if window.location().origin().ok().as_deref() != Some(event.origin().as_str()) { return }
         let data = event.data();
@@ -525,7 +525,7 @@ type UnifiedAppearance = Rc<RefCell<Option<String>>>;
 fn listen_unified_appearance(settings: UnifiedAppearance, ctx: egui::Context) {
     use wasm_bindgen::closure::Closure;
     let Some(window) = web_sys::window() else { return };
-    let cb = Closure::<dyn FnMut(web_sys::MessageEvent)>::new(move |event| {
+    let cb = Closure::<dyn FnMut(web_sys::MessageEvent)>::new(move |event: web_sys::MessageEvent| {
         let Some(window) = web_sys::window() else { return };
         if window.location().origin().ok().as_deref() != Some(event.origin().as_str()) { return }
         let data = event.data();
@@ -538,6 +538,7 @@ fn listen_unified_appearance(settings: UnifiedAppearance, ctx: egui::Context) {
 }
 '@
 Insert-Before-Once $audioWeb 'const CANVAS_ID:' 'fn listen_unified_appearance(' $audioSettingsListener
+Replace-Exact $audioWeb 'let cb = Closure::<dyn FnMut(web_sys::MessageEvent)>::new(move |event| {' 'let cb = Closure::<dyn FnMut(web_sys::MessageEvent)>::new(move |event: web_sys::MessageEvent| {'
 Replace-Exact 'upstream/soundcraft/apps/soundcraft-web/Cargo.toml' '"CssStyleDeclaration"]' '"CssStyleDeclaration", "MessageEvent", "EventTarget"]'
 Insert-After-Once $audioWeb '    samples: SampleInbox,' 'tab_state: String,' '    tab_state: String,'
 Replace-Exact $audioWeb 'WebShell { app, inbox: Rc::default(), samples: Rc::default() }' 'WebShell { app, inbox: Rc::default(), samples: Rc::default(), tab_state: String::new(), unified_appearance }'
