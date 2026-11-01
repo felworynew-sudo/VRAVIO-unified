@@ -417,6 +417,8 @@ foreach ($line in @(
 # The browser raster editor periodically exports changed documents in its native,
 # layered format. The parent shell owns durable IndexedDB storage and recovery UI.
 $rasterWeb = 'upstream/photocraft/apps/photocraft-web/src/web.rs'
+Replace-Exact 'upstream/photocraft/apps/photocraft-web/Cargo.toml' 'log = { workspace = true }' "log = { workspace = true }`nserde_json = { workspace = true }"
+Replace-Exact 'upstream/photocraft/apps/photocraft-web/Cargo.toml' "[dev-dependencies]`nserde_json = { workspace = true }" '[dev-dependencies]'
 Replace-Exact $rasterWeb 'fn listen_restore_result(inbox: Inbox, cutout_inbox: CutoutInbox, restore_inbox: RestoreInbox, place_inbox: Inbox, snapshot_requested: Arc<AtomicBool>, ctx: egui::Context)' 'fn listen_restore_result(inbox: Inbox, cutout_inbox: CutoutInbox, restore_inbox: RestoreInbox, place_inbox: Inbox, snapshot_requested: Arc<AtomicBool>, tab_action: TabAction, ctx: egui::Context)'
 Replace-Exact $rasterWeb 'type RestoreInbox = Arc<Mutex<Vec<(String, Vec<u8>, Vec<u8>)>>>;' "type RestoreInbox = Arc<Mutex<Vec<(String, Vec<u8>, Vec<u8>)>>>;`ntype TabAction = Arc<Mutex<Option<(String, usize)>>>;"
 Insert-After-Once $rasterWeb '                    PhotocraftApp::setup_context(&cc.egui_ctx, ThemeKind::Studio);' 'vravio-unified-tabs' '                    cc.egui_ctx.data_mut(|data| data.insert_temp(egui::Id::new("vravio-unified-tabs"), true));'
