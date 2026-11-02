@@ -429,8 +429,9 @@ function render() {
           }, true);
           let vectorPasteAt = 0;
           let rasterPasteAt = 0;
+          const isTextEntry = event => Boolean(event.target?.closest?.('input, textarea, [contenteditable="true"]'));
           const pasteVectorIntoRaster = event => {
-            if (tab.kind !== 'raster' || crossClipboardKind !== 'vector' || !crossClipboard) return false;
+            if (tab.kind !== 'raster' || isTextEntry(event) || crossClipboardKind !== 'vector' || !crossClipboard) return false;
             event.preventDefault();
             event.stopImmediatePropagation();
             if (Date.now() - rasterPasteAt < 300) return true;
@@ -443,7 +444,7 @@ function render() {
             return true;
           };
           const pasteRasterIntoVector = event => {
-            if (tab.kind !== 'vector' || crossClipboardKind !== 'raster' || !crossClipboard) return false;
+            if (tab.kind !== 'vector' || isTextEntry(event) || crossClipboardKind !== 'raster' || !crossClipboard) return false;
             event.preventDefault();
             event.stopImmediatePropagation();
             // Some browsers deliver both keydown and paste; place the image once.
@@ -460,8 +461,8 @@ function render() {
           };
           child.addEventListener('paste', pasteRasterIntoVector, true);
           child.addEventListener('paste', pasteVectorIntoRaster, true);
-          const copyVectorSelection = () => {
-            if (tab.kind !== 'vector') return;
+          const copyVectorSelection = event => {
+            if (tab.kind !== 'vector' || isTextEntry(event)) return;
             const api = child.vectorcraft;
             if (!api) return;
             crossClipboardKind = 'vector';
@@ -483,7 +484,7 @@ function render() {
               return;
             }
             if (tab.kind === 'vector' && key === 'c' && !event.shiftKey) {
-              copyVectorSelection();
+              copyVectorSelection(event);
             } else if (tab.kind !== 'raster' && tab.kind !== 'vector' && (key === 'c' || key === 'x')) {
               crossClipboardKind = null;
               crossClipboard = null;
