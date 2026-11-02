@@ -109,7 +109,7 @@ pub(super) fn selection_glow_segments(painter: &egui::Painter, xf: &ViewXform, s
 }
 '@
 Insert-Before-Once 'upstream/photocraft/crates/ui-egui/src/canvas/paint.rs' '/// Draw boundary segments as marching ants:' 'pub(super) fn selection_glow_segments' $glow
-Insert-Before-Once 'upstream/photocraft/crates/ui-egui/src/canvas.rs' '                marching_ants_segments(input.painter, &shown, segs, time);' 'paint::selection_glow_segments(input.painter, &shown, segs, sel, k);' '                paint::selection_glow_segments(input.painter, &shown, segs, sel, k);'
+Insert-Before-Once 'upstream/photocraft/crates/ui-egui/src/canvas.rs' '            ants = boxed.unwrap_or_else(|| marching_ants_segment_shapes(input.painter, &shown, segs, time));' 'paint::selection_glow_segments(input.painter, &shown, segs, sel, k);' '            paint::selection_glow_segments(input.painter, &shown, segs, sel, k);'
 $restoreItem = @'
     items.push(MenuItem {
         id: "filter.vravio.photoRestore".into(),
