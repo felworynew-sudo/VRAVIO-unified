@@ -427,6 +427,24 @@ function render() {
             if (!link || link.hasAttribute('download') || link.href.startsWith('blob:')) return;
             if (new URL(link.href).origin !== window.location.origin) event.preventDefault();
           }, true);
+          let vectorPasteAt = 0;
+          const pasteRasterIntoVector = event => {
+            if (tab.kind !== 'vector' || crossClipboardKind !== 'raster' || !crossClipboard) return false;
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            // Some browsers deliver both keydown and paste; place the image once.
+            if (Date.now() - vectorPasteAt < 300) return true;
+            vectorPasteAt = Date.now();
+            void crossClipboard.then(async bytes => {
+              if (!bytes) { showClipboardStatus(uiText('Не удалось подготовить растровое выделение', 'Could not prepare the raster selection')); return; }
+              try {
+                await child.vectorcraft.execute('file.place', { name: 'raster-selection.png', dataBase64: base64FromBytes(bytes) });
+                showClipboardStatus(uiText('Растровое выделение вставлено в векторный документ', 'Raster selection pasted into the vector document'));
+              } catch (error) { showClipboardStatus(`${uiText('Не удалось вставить в вектор', 'Could not paste into Vector')}: ${error.message}`); }
+            });
+            return true;
+          };
+          child.addEventListener('paste', pasteRasterIntoVector, true);
           // Keep editor shortcuts inside the app. Browsers otherwise claim
           // Ctrl+N/O/S/W before the canvas-based editors can handle them.
           child.addEventListener('keydown', event => {
@@ -456,18 +474,7 @@ function render() {
               });
               return;
             }
-            if (tab.kind === 'vector' && key === 'v' && crossClipboardKind === 'raster' && crossClipboard) {
-              event.preventDefault();
-              event.stopImmediatePropagation();
-              void crossClipboard.then(async bytes => {
-                if (!bytes) { showClipboardStatus(uiText('Не удалось подготовить растровое выделение', 'Could not prepare the raster selection')); return; }
-                try {
-                  await child.vectorcraft.execute('file.place', { name: 'raster-selection.png', dataBase64: base64FromBytes(bytes) });
-                  showClipboardStatus(uiText('Растровое выделение вставлено в векторный документ', 'Raster selection pasted into the vector document'));
-                } catch (error) { showClipboardStatus(`${uiText('Не удалось вставить в вектор', 'Could not paste into Vector')}: ${error.message}`); }
-              });
-              return;
-            }
+            if (key === 'v' && pasteRasterIntoVector(event)) return;
             if (['n', 'o', 's', 'w'].includes(key)) {
               event.preventDefault();
             }
