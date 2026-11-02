@@ -460,6 +460,17 @@ function render() {
           };
           child.addEventListener('paste', pasteRasterIntoVector, true);
           child.addEventListener('paste', pasteVectorIntoRaster, true);
+          const copyVectorSelection = () => {
+            if (tab.kind !== 'vector') return;
+            const api = child.vectorcraft;
+            if (!api) return;
+            crossClipboardKind = 'vector';
+            crossClipboard = api.execute('document.serialize', { format: 'png', selectedOnly: true })
+              .then(result => cropTransparentPng(bytesFromBase64(result.dataBase64)))
+              .catch(() => null);
+            showClipboardStatus(uiText('Векторное выделение готово для вставки в растр', 'Vector selection is ready to paste into Raster'));
+          };
+          child.addEventListener('copy', copyVectorSelection, true);
           // Keep editor shortcuts inside the app. Browsers otherwise claim
           // Ctrl+N/O/S/W before the canvas-based editors can handle them.
           child.addEventListener('keydown', event => {
@@ -472,9 +483,7 @@ function render() {
               return;
             }
             if (tab.kind === 'vector' && key === 'c' && !event.shiftKey) {
-              const api = child.vectorcraft;
-              crossClipboardKind = 'vector';
-              crossClipboard = api?.execute('document.serialize', { format: 'png', selectedOnly: true }).then(result => cropTransparentPng(bytesFromBase64(result.dataBase64))).catch(() => null) ?? null;
+              copyVectorSelection();
             } else if (tab.kind !== 'raster' && tab.kind !== 'vector' && (key === 'c' || key === 'x')) {
               crossClipboardKind = null;
               crossClipboard = null;
