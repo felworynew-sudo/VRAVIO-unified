@@ -116,7 +116,7 @@ async function editVectorImage() {
   const vector = tabs.find(t => t.kind === 'vector');
   const frame = vector && frames.get(vector.id);
   const api = frame?.contentWindow?.vectorcraft;
-  if (!api) { bridgeStatus = 'Векторный редактор ещё загружается'; render(); return; }
+  if (!api) { bridgeStatus = uiText('Векторный редактор ещё загружается', 'The vector editor is still loading'); render(); return; }
   try {
     const state = await api.inspect();
     const selected = await api.execute('links.goTo', {});
@@ -124,12 +124,12 @@ async function editVectorImage() {
     const payload = await asPng(bytesFromBase64(image.dataBase64), image.name);
     const token = Array.from(crypto.getRandomValues(new Uint8Array(16)), x => x.toString(16).padStart(2, '0')).join('');
     vectorEdit = { token, id: selected.id, vectorId: vector.id, documentIndex: state.activeDocument, documentTitle: state.documents?.[state.activeDocument]?.title, payload };
-    bridgeStatus = 'Изображение открывается в растре. Ctrl+S вернёт правку в вектор.';
+    bridgeStatus = uiText('Изображение открывается в растре. Ctrl+S вернёт правку в вектор.', 'Opening the image in Raster. Ctrl+S will send changes back to Vector.');
     rasterReady = Boolean(tabs.find(t => t.kind === 'raster') && rasterReady);
     openTab('raster');
     deliverVectorImage();
   } catch (error) {
-    bridgeStatus = `Выделите встроенное изображение: ${error.message}`;
+    bridgeStatus = `${uiText('Выделите встроенное изображение', 'Select an embedded image')}: ${error.message}`;
     render();
   }
 }
@@ -139,7 +139,7 @@ async function returnVectorImage(message) {
   if (frames.get(raster?.id)?.contentWindow !== message.source) return;
   const vector = tabs.find(t => t.id === vectorEdit.vectorId);
   const api = vector && frames.get(vector.id)?.contentWindow?.vectorcraft;
-  if (!api) { bridgeStatus = 'Векторная среда закрыта. Изменения остались в растровой вкладке.'; render(); return; }
+  if (!api) { bridgeStatus = uiText('Векторная среда закрыта. Изменения остались в растровой вкладке.', 'The Vector workspace is closed. Changes remain in the Raster tab.'); render(); return; }
   try {
     const bytes = message.bytes instanceof ArrayBuffer ? new Uint8Array(message.bytes) : message.bytes;
     if (!(bytes instanceof Uint8Array) || ![137, 80, 78, 71, 13, 10, 26, 10].every((v, i) => bytes[i] === v)) throw new Error('Растровый редактор вернул некорректный PNG');
@@ -148,9 +148,9 @@ async function returnVectorImage(message) {
     await api.execute('links.goTo', { id: vectorEdit.id });
     const result = await api.execute('file.place', { name: 'vravio-edited.png', dataBase64: base64FromBytes(bytes), replace: true });
     vectorEdit.id = result.ids?.[0] ?? vectorEdit.id;
-    bridgeStatus = 'Правка применена в векторном документе. Сохраните его для записи на диск.';
+    bridgeStatus = uiText('Правка применена в векторном документе. Сохраните его для записи на диск.', 'The change was applied to the vector document. Save that document to keep it on disk.');
     selectTab(vector.id);
-  } catch (error) { bridgeStatus = `Не удалось заменить изображение: ${error.message}`; render(); }
+  } catch (error) { bridgeStatus = `${uiText('Не удалось заменить изображение', 'Could not replace the image')}: ${error.message}`; render(); }
 }
 function announceBridge() {
   if (!bridge || bridge.origin) return;
@@ -359,9 +359,10 @@ function closeTab(id) {
 function render() {
   const active = tabs.find(t => t.id === activeId);
   if (!app.querySelector('.workarea')) app.innerHTML = `
-    <nav class="tabs" aria-label="Workspaces"></nav>
+    <nav class="tabs" aria-label="${uiText('Рабочие среды', 'Workspaces')}"></nav>
     <main class="workarea"></main>
     <div id="modal-root"></div><div id="restorer-root"></div><div id="recovery-root"></div>`;
+  app.querySelector('.tabs').setAttribute('aria-label', uiText('Рабочие среды', 'Workspaces'));
   app.querySelector('.tabs').innerHTML = `
       ${tabs.map(tab => {
         const dirty = documentStates.get(tab.kind)?.documents.some(document => document.dirty);
@@ -372,7 +373,7 @@ function render() {
         </div>`;
       }).join('')}
       <button class="tab-add" id="add" title="${uiText('Открыть рабочую среду', 'Open workspace')}" aria-label="${uiText('Открыть рабочую среду', 'Open workspace')}">＋</button>`;
-  if (bridge) app.querySelector('.tabs').insertAdjacentHTML('beforeend', '<span class="bridge-label" title="Ctrl+S отправит результат в сортировщик">Связано с сортировщиком · Ctrl+S для возврата</span>');
+  if (bridge) app.querySelector('.tabs').insertAdjacentHTML('beforeend', `<span class="bridge-label" title="${uiText('Ctrl+S отправит результат в сортировщик', 'Ctrl+S sends the result back to the sorter')}">${uiText('Связано с сортировщиком · Ctrl+S для возврата', 'Connected to sorter · Ctrl+S to return')}</span>`);
   const workarea = app.querySelector('.workarea');
   workarea.querySelector('.bridge-status')?.remove();
   if (bridgeStatus) {
@@ -452,7 +453,7 @@ function render() {
               void crossClipboard.then(async bytes => {
                 if (!bytes) return;
                 try { await child.vectorcraft.execute('file.place', { name: 'raster-selection.png', dataBase64: base64FromBytes(bytes) }); }
-                catch (error) { bridgeStatus = `Не удалось вставить в вектор: ${error.message}`; render(); }
+                catch (error) { bridgeStatus = `${uiText('Не удалось вставить в вектор', 'Could not paste into Vector')}: ${error.message}`; render(); }
               });
               return;
             }
