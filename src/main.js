@@ -32,6 +32,11 @@ const seenSettings = new Set();
 let rasterReady = false;
 let vectorEdit = null;
 let bridgeStatus = '';
+function showClipboardStatus(message) {
+  bridgeStatus = message;
+  render();
+  setTimeout(() => { if (bridgeStatus === message) { bridgeStatus = ''; render(); } }, 4000);
+}
 let crossClipboard = null;
 let crossClipboardKind = null;
 let audioWelcome = true;
@@ -445,8 +450,9 @@ function render() {
               event.preventDefault();
               event.stopImmediatePropagation();
               void crossClipboard.then(bytes => {
-                if (!bytes) return;
+                if (!bytes) { showClipboardStatus(uiText('Не удалось подготовить векторное выделение', 'Could not prepare the vector selection')); return; }
                 child.postMessage({ type: 'vravio-restorer-result', mode: 'current', name: 'vector-selection.png', bytes }, location.origin);
+                showClipboardStatus(uiText('Векторное выделение вставлено в растровый документ', 'Vector selection pasted into the raster document'));
               });
               return;
             }
@@ -454,9 +460,11 @@ function render() {
               event.preventDefault();
               event.stopImmediatePropagation();
               void crossClipboard.then(async bytes => {
-                if (!bytes) return;
-                try { await child.vectorcraft.execute('file.place', { name: 'raster-selection.png', dataBase64: base64FromBytes(bytes) }); }
-                catch (error) { bridgeStatus = `${uiText('Не удалось вставить в вектор', 'Could not paste into Vector')}: ${error.message}`; render(); }
+                if (!bytes) { showClipboardStatus(uiText('Не удалось подготовить растровое выделение', 'Could not prepare the raster selection')); return; }
+                try {
+                  await child.vectorcraft.execute('file.place', { name: 'raster-selection.png', dataBase64: base64FromBytes(bytes) });
+                  showClipboardStatus(uiText('Растровое выделение вставлено в векторный документ', 'Raster selection pasted into the vector document'));
+                } catch (error) { showClipboardStatus(`${uiText('Не удалось вставить в вектор', 'Could not paste into Vector')}: ${error.message}`); }
               });
               return;
             }
@@ -572,6 +580,7 @@ window.addEventListener('message', event => {
     if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1 || width * height > 16_000_000 || !(pixels instanceof Uint8Array) || pixels.length !== width * height * 4) return;
     crossClipboardKind = 'raster';
     crossClipboard = rgbaToPng(width, height, pixels).catch(() => null);
+    showClipboardStatus(uiText('Растровое выделение готово для вставки в вектор', 'Raster selection is ready to paste into Vector'));
     return;
   }
   if (message?.type === 'vravio-documents:state') {
