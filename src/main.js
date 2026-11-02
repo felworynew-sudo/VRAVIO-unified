@@ -228,9 +228,9 @@ function setDocumentState(kind, documents, activeIndex) {
   if (JSON.stringify(previous) === JSON.stringify(next)) return;
   documentStates.set(kind, next);
   if (kind === 'raster') {
-    const remaining = new Set(clean.map(document => String(document.id)));
+    const remainingDirty = new Set(clean.filter(document => document.dirty).map(document => String(document.id)));
     for (const document of previous?.documents || []) {
-      if (!remaining.has(String(document.id))) void removeSnapshot(`${recoverySession}:${document.id}`).catch(error => console.warn('Не удалось удалить закрытую копию:', error));
+      if (!remainingDirty.has(String(document.id))) void removeSnapshot(`${recoverySession}:${document.id}`).catch(error => console.warn('Не удалось удалить устаревшую копию:', error));
     }
     if (clean.some(document => document.dirty) && !recoverySoon) {
       recoverySoon = setTimeout(() => { recoverySoon = null; requestRasterSnapshot(); }, 2000);
@@ -345,6 +345,9 @@ function closeTab(id) {
   const state = documentStates.get(closedKind);
   const needsConfirmation = !state || state.documents.some(document => document.dirty);
   if (needsConfirmation && !window.confirm(uiText(`Закрыть среду «${environmentName(closedKind)}»? Несохранённые изменения в ней будут потеряны.`, `Close the ${environmentName(closedKind)} workspace? Unsaved changes will be lost.`))) return;
+  if (closedKind === 'raster') for (const document of state?.documents || []) {
+    void removeSnapshot(`${recoverySession}:${document.id}`).catch(error => console.warn('Не удалось удалить закрытую копию:', error));
+  }
   tabs.splice(index, 1);
   documentStates.delete(closedKind);
   seenSettings.delete(closedKind);
