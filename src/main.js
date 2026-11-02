@@ -38,6 +38,7 @@ let audioWelcome = true;
 const recoverySession = crypto.randomUUID();
 let recoveryShown = false;
 let recoveryTimer = null;
+let recoverySoon = null;
 const bridgeToken = location.hash.match(/^#bridge=([a-f0-9]{32})$/)?.[1] || null;
 const bridge = bridgeToken && window.opener ? { token: bridgeToken, opener: window.opener, origin: null, payload: null, rasterReady: false, sent: false } : null;
 const app = document.querySelector('#app');
@@ -167,7 +168,7 @@ async function showRasterRecovery() {
     if (!snapshots.length) return;
     const root = app.querySelector('#recovery-root');
     if (!root) return;
-    root.innerHTML = `<div class="recovery-scrim"><div class="recovery-dialog" role="dialog" aria-modal="true" aria-label="Восстановление документов"><h2>Восстановить растровую работу?</h2><p>Найдены копии несохранённых документов. Они хранят слои и доступны только в этом браузере.</p><div class="recovery-list"></div><button class="recovery-later">Позже</button></div></div>`;
+    root.innerHTML = `<div class="recovery-scrim"><div class="recovery-dialog" role="dialog" aria-modal="true" aria-label="${uiText('Восстановление документов', 'Document recovery')}"><h2>${uiText('Восстановить растровую работу?', 'Restore raster work?')}</h2><p>${uiText('Найдены копии несохранённых документов. Они хранят слои и доступны только в этом браузере.', 'Unsaved document copies were found. They include layers and are stored only in this browser.')}</p><div class="recovery-list"></div><button class="recovery-later">${uiText('Позже', 'Later')}</button></div></div>`;
     const list = root.querySelector('.recovery-list');
     for (const snapshot of snapshots) {
       const row = document.createElement('div');
@@ -175,16 +176,16 @@ async function showRasterRecovery() {
       const label = document.createElement('span');
       label.textContent = `${snapshot.name} · ${new Date(snapshot.savedAt).toLocaleString()}`;
       const restore = document.createElement('button');
-      restore.textContent = 'Восстановить';
+      restore.textContent = uiText('Восстановить', 'Restore');
       restore.onclick = () => {
         const raster = tabs.find(t => t.kind === 'raster');
-        const name = `${String(snapshot.name || 'Документ').replace(/\.pcraft$/i, '')}.pcraft`;
+        const name = `${String(snapshot.name || uiText('Документ', 'Document')).replace(/\.pcraft$/i, '')}.pcraft`;
         frames.get(raster?.id)?.contentWindow?.postMessage({ type: 'vravio-recovery:open', name, bytes: snapshot.bytes }, location.origin);
         root.replaceChildren();
         if (raster) selectTab(raster.id);
       };
       const remove = document.createElement('button');
-      remove.textContent = 'Удалить копию';
+      remove.textContent = uiText('Удалить копию', 'Delete copy');
       remove.onclick = async () => { await removeSnapshot(snapshot.key); row.remove(); if (!list.children.length) root.replaceChildren(); };
       row.append(label, restore, remove);
       list.append(row);
@@ -223,8 +224,18 @@ function setDocumentState(kind, documents, activeIndex) {
   if (!environments[kind] || !Array.isArray(documents)) return;
   const clean = documents.slice(0, 100).map((document, index) => ({ id: document.id ?? index, name: String(document.name ?? document.title ?? `Документ ${index + 1}`).slice(0, 200), dirty: Boolean(document.dirty) }));
   const next = { documents: clean, activeIndex: Number.isInteger(activeIndex) ? activeIndex : -1 };
-  if (JSON.stringify(documentStates.get(kind)) === JSON.stringify(next)) return;
+  const previous = documentStates.get(kind);
+  if (JSON.stringify(previous) === JSON.stringify(next)) return;
   documentStates.set(kind, next);
+  if (kind === 'raster') {
+    const remaining = new Set(clean.map(document => String(document.id)));
+    for (const document of previous?.documents || []) {
+      if (!remaining.has(String(document.id))) void removeSnapshot(`${recoverySession}:${document.id}`).catch(error => console.warn('Не удалось удалить закрытую копию:', error));
+    }
+    if (clean.some(document => document.dirty) && !recoverySoon) {
+      recoverySoon = setTimeout(() => { recoverySoon = null; requestRasterSnapshot(); }, 2000);
+    }
+  }
   render();
 }
 function languageCode(value) {
@@ -505,7 +516,7 @@ document.addEventListener('keydown', event => {
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'w' && activeId !== null && !chooserOpen) { event.preventDefault(); closeTab(activeId); }
 });
 window.addEventListener('beforeunload', event => {
-  if (!tabs.length) return;
+  if (![...documentStates.values()].some(state => state.documents.some(document => document.dirty))) return;
   event.preventDefault();
   event.returnValue = '';
 });
@@ -545,6 +556,7 @@ window.addEventListener('message', event => {
     if (frames.get(raster?.id)?.contentWindow !== event.source) return;
     const bytes = message.bytes instanceof ArrayBuffer ? new Uint8Array(message.bytes) : message.bytes;
     if (!(bytes instanceof Uint8Array) || !bytes.length || bytes.length > 500_000_000 || !/^\d+$/.test(message.id) || !/^\d+$/.test(message.revision)) return;
+    if (documentStates.has('raster') && !documentStates.get('raster').documents.some(document => String(document.id) === message.id && document.dirty)) return;
     void putSnapshot({ key: `${recoverySession}:${message.id}`, name: String(message.name || 'Документ').slice(0, 200), revision: message.revision, bytes, savedAt: Date.now() }).catch(error => console.warn('Не удалось сохранить растровую копию:', error));
     return;
   }

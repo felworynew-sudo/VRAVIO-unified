@@ -42,7 +42,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .recovery-list { display: grid; gap: 8px; }
 .recovery-row { display: flex; align-items: center; gap: 8px; padding: 9px; border: 1px solid #414148; border-radius: 6px; }
 .recovery-row span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.recovery-row button, .recovery-later { padding: 6px 10px; border: 1px solid #55555c; border-radius: 5px; background: #303036; }
+.recovery-row button, .recovery-later { padding: 6px 10px; border: 1px solid #55555c; border-radius: 5px; background: #303036; color: #ececf0; }
 .recovery-row button:hover, .recovery-later:hover { border-color: #a100ff; }
 .recovery-later { margin-top: 20px; }
 .scrim { position: fixed; inset: 0; display: grid; place-items: center; z-index: 10; background: #06080cba; padding: 20px; }
@@ -73,3 +73,5 @@ button { font: inherit; color: inherit; cursor: pointer; }
 :root[data-appearance="light"] .dialog, :root[data-appearance="light"] .recovery-dialog { background: #f7f8fa; border-color: #c7cbd2; }
 :root[data-appearance="light"] .choice, :root[data-appearance="light"] .audio-welcome button { background: #e9ecf1; border-color: #c7cbd2; }
 :root[data-appearance="light"] .dialog p, :root[data-appearance="light"] .recovery-dialog p { color: #687280; }
+:root[data-appearance="light"] .recovery-row { border-color: #c7cbd2; }
+:root[data-appearance="light"] .recovery-row button, :root[data-appearance="light"] .recovery-later { background: #e9ecf1; border-color: #bfc5cf; color: #252b35; }
