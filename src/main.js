@@ -428,6 +428,20 @@ function render() {
             if (new URL(link.href).origin !== window.location.origin) event.preventDefault();
           }, true);
           let vectorPasteAt = 0;
+          let rasterPasteAt = 0;
+          const pasteVectorIntoRaster = event => {
+            if (tab.kind !== 'raster' || crossClipboardKind !== 'vector' || !crossClipboard) return false;
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            if (Date.now() - rasterPasteAt < 300) return true;
+            rasterPasteAt = Date.now();
+            void crossClipboard.then(bytes => {
+              if (!bytes) { showClipboardStatus(uiText('Не удалось подготовить векторное выделение', 'Could not prepare the vector selection')); return; }
+              child.postMessage({ type: 'vravio-restorer-result', mode: 'current', name: 'vector-selection.png', bytes }, location.origin);
+              showClipboardStatus(uiText('Векторное выделение вставлено в растровый документ', 'Vector selection pasted into the raster document'));
+            });
+            return true;
+          };
           const pasteRasterIntoVector = event => {
             if (tab.kind !== 'vector' || crossClipboardKind !== 'raster' || !crossClipboard) return false;
             event.preventDefault();
@@ -445,6 +459,7 @@ function render() {
             return true;
           };
           child.addEventListener('paste', pasteRasterIntoVector, true);
+          child.addEventListener('paste', pasteVectorIntoRaster, true);
           // Keep editor shortcuts inside the app. Browsers otherwise claim
           // Ctrl+N/O/S/W before the canvas-based editors can handle them.
           child.addEventListener('keydown', event => {
@@ -464,16 +479,7 @@ function render() {
               crossClipboardKind = null;
               crossClipboard = null;
             }
-            if (tab.kind === 'raster' && key === 'v' && crossClipboardKind === 'vector' && crossClipboard) {
-              event.preventDefault();
-              event.stopImmediatePropagation();
-              void crossClipboard.then(bytes => {
-                if (!bytes) { showClipboardStatus(uiText('Не удалось подготовить векторное выделение', 'Could not prepare the vector selection')); return; }
-                child.postMessage({ type: 'vravio-restorer-result', mode: 'current', name: 'vector-selection.png', bytes }, location.origin);
-                showClipboardStatus(uiText('Векторное выделение вставлено в растровый документ', 'Vector selection pasted into the raster document'));
-              });
-              return;
-            }
+            if (key === 'v' && pasteVectorIntoRaster(event)) return;
             if (key === 'v' && pasteRasterIntoVector(event)) return;
             if (['n', 'o', 's', 'w'].includes(key)) {
               event.preventDefault();
