@@ -26,6 +26,8 @@ foreach ($item in $apps) {
   $target = Join-Path $dist "editors\$($item.kind)"
   New-Item -ItemType Directory -Force $target | Out-Null
   Copy-Item (Join-Path $source '*') $target -Recurse -Force
+  # Cloud font catalog: the raster and vector editors list these families and fetch one when it is used.
+  if (@('raster','vector') -contains $item.kind) { $fontsDir = Join-Path $target 'fonts'; New-Item -ItemType Directory -Force $fontsDir | Out-Null; Copy-Item (Join-Path $root 'font-catalog/manifest.txt') $fontsDir -Force }
 }
 $film = Join-Path $root 'upstream\filmcraft'
 if (-not (Test-Path (Join-Path $film 'Cargo.toml'))) { throw "Missing source: $film. Run git submodule update --init --recursive." }

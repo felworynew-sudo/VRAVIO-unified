@@ -31,6 +31,8 @@ if (-not (Test-Path $source)) { throw "Missing bundle: $source" }
 $target = Join-Path $root "dist/editors/$Kind"
 New-Item -ItemType Directory -Force $target | Out-Null
 Copy-Item (Join-Path $source '*') $target -Recurse -Force
+# Cloud font catalog: the raster and vector editors list these families and fetch one when it is used.
+if (@('raster','vector') -contains $Kind) { $fontsDir = Join-Path $target 'fonts'; New-Item -ItemType Directory -Force $fontsDir | Out-Null; Copy-Item (Join-Path $root 'font-catalog/manifest.txt') $fontsDir -Force }
 foreach ($page in (Get-ChildItem $target -Recurse -Filter '*.html' -File)) {
   $html = [IO.File]::ReadAllText($page.FullName)
   foreach ($sourceName in @('PhotoCraft','VectorCraft','FilmCraft','SoundCraft','ArtCraft')) {

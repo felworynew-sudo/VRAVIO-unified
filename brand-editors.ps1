@@ -722,4 +722,231 @@ $snapshotReceiver = @'
         }
 '@
 Insert-Before-Once $rasterWeb '        if kind.as_deref() == Some("vravio-bridge:open") {' 'vravio-recovery:snapshot-request' $snapshotReceiver
+# Cloud font catalog (font-catalog/manifest.txt, copied next to each web editor as fonts/manifest.txt).
+# Its files are `gfonts/<commit>/<licence>/<family>/<file>`: pinned TTFs of the google/fonts repository on
+# raw.githubusercontent.com (jsDelivr refuses the files of this repository it hasn't cached: the
+# repository is over its 50 MB limit). The editors' served-fonts loader fetches a family when it is
+# picked or hovered; this lets it read those paths cross-origin (CORS) while every other path stays
+# same-origin.
+$cloudFetchOld = @'
+    let window = web_sys::window().ok_or("no window")?;
+    let init = web_sys::RequestInit::new();
+    init.set_mode(web_sys::RequestMode::SameOrigin);
+'@
+$cloudFetchNew = @'
+    let window = web_sys::window().ok_or("no window")?;
+    // VRAVIO: `gfonts/<commit>/<licence>/<family>/<file>` is a pinned file of google/fonts (cloud font catalog).
+    let cloud = url.strip_prefix("gfonts/").map(|rest| format!("https://raw.githubusercontent.com/google/fonts/{rest}"));
+    let init = web_sys::RequestInit::new();
+    init.set_mode(if cloud.is_some() { web_sys::RequestMode::Cors } else { web_sys::RequestMode::SameOrigin });
+'@
+Replace-Exact $rasterWeb $cloudFetchOld $cloudFetchNew
+Replace-Exact $rasterWeb 'let request = window.fetch_with_str_and_init(url, &init);' 'let request = window.fetch_with_str_and_init(cloud.as_deref().unwrap_or(url), &init);'
+
+# Cloud font catalog for the vector editor: the same fonts/manifest.txt as the raster editor. Its
+# families join the font menu; when text first asks for one that isn't loaded, the web shell fetches
+# its files (pinned google/fonts TTFs) and adds them to the font database.
+$vectorText = 'upstream/vectorcraft/crates/text/src'
+$cloudRs = @'
+//! Cloud font catalog (VRAVIO): families the web build fetches on demand. The site lists them in
+//! `fonts/manifest.txt` (`family | style | file`, one file per line). A family is requested the
+//! first time text asks for it and isn't loaded; the web shell fetches its files and adds them
+//! with `FontDb::add_font`.
+
+use std::collections::{HashMap, HashSet};
+use std::sync::{LazyLock, Mutex, MutexGuard, PoisonError};
+
+#[derive(Default)]
+struct State {
+    /// The families the catalog lists, in manifest order.
+    families: Vec<String>,
+    /// Each family's files (paths relative to the site root).
+    files: HashMap<String, Vec<String>>,
+    /// Families asked for, not yet taken by [`take_requests`].
+    requested: Vec<String>,
+    /// Families already asked for (and not reported as failed).
+    asked: HashSet<String>,
+}
+
+static STATE: LazyLock<Mutex<State>> = LazyLock::new(|| Mutex::new(State::default()));
+
+fn state() -> MutexGuard<'static, State> {
+    STATE.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// Lists the families of a manifest (`family | style | file`; `#` comments and malformed lines are
+/// skipped). Returns how many new families were added; the font menus refresh when it is above 0.
+pub fn add_manifest(text: &str) -> usize {
+    let mut added = 0;
+    {
+        let mut guard = state();
+        let s = &mut *guard;
+        for line in text.lines() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            let mut fields = line.split(" | ").map(str::trim);
+            let (Some(family), Some(_style), Some(file)) = (fields.next(), fields.next(), fields.next()) else { continue };
+            if family.is_empty() || file.is_empty() || file.starts_with('/') || file.contains("..") || file.contains('\\') {
+                continue;
+            }
+            let entry = s.files.entry(family.to_string()).or_default();
+            if entry.is_empty() {
+                s.families.push(family.to_string());
+                added += 1;
+            }
+            entry.push(file.to_string());
+        }
+    }
+    if added > 0 {
+        crate::FontDb::global().changed();
+    }
+    added
+}
+
+/// The families the catalog lists.
+pub fn families() -> Vec<String> {
+    state().families.clone()
+}
+
+/// Does the catalog list `family` (any case)?
+pub fn contains(family: &str) -> bool {
+    state().families.iter().any(|f| f.eq_ignore_ascii_case(family))
+}
+
+/// Asks for a catalog family's files; once per family, and only for families the catalog lists.
+pub fn request(family: &str) {
+    let mut guard = state();
+    let s = &mut *guard;
+    let Some(name) = s.families.iter().find(|f| f.eq_ignore_ascii_case(family)).cloned() else { return };
+    if s.asked.insert(name.clone()) {
+        s.requested.push(name);
+    }
+}
+
+/// The families asked for since the last call, each with its files.
+pub fn take_requests() -> Vec<(String, Vec<String>)> {
+    let mut guard = state();
+    let s = &mut *guard;
+    let asked = std::mem::take(&mut s.requested);
+    asked
+        .into_iter()
+        .map(|f| {
+            let files = s.files.get(&f).cloned().unwrap_or_default();
+            (f, files)
+        })
+        .collect()
+}
+
+/// A family's files couldn't be fetched: it may be asked for again.
+pub fn failed(family: &str) {
+    state().asked.remove(family);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Requests are process-wide: the tests that take them run one at a time.
+    static SERIAL: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn a_manifest_lists_its_families_once_and_skips_bad_lines() {
+        let added = add_manifest(
+            "# comment\nCloud Test A | Regular | gfonts/c/ofl/a/A.ttf\nCloud Test A | Bold | gfonts/c/ofl/a/A-Bold.ttf\nbroken line\nCloud Test B | Regular | /etc/passwd\nCloud Test C | Regular | gfonts/../x.ttf\n",
+        );
+        assert_eq!(added, 1);
+        assert!(contains("cloud test a"));
+        assert!(!contains("Cloud Test B") && !contains("Cloud Test C"));
+        assert!(crate::FontDb::global().families().iter().any(|f| f == "Cloud Test A"), "the font menus list it");
+        assert!(crate::FontDb::global().has_family("Cloud Test A"), "a document naming it isn't missing a font");
+    }
+
+    #[test]
+    fn a_family_is_requested_once_with_its_files_until_it_fails() {
+        let _serial = SERIAL.lock().unwrap_or_else(PoisonError::into_inner);
+        add_manifest("Cloud Test D | Regular | gfonts/c/ofl/d/D.ttf\nCloud Test D | Bold | gfonts/c/ofl/d/D-Bold.ttf\n");
+        request("Not In The Catalog");
+        request("cloud test d");
+        request("Cloud Test D");
+        let got: Vec<_> = take_requests().into_iter().filter(|(f, _)| f.starts_with("Cloud Test") || f.starts_with("Not In")).collect();
+        assert_eq!(got, vec![("Cloud Test D".to_string(), vec!["gfonts/c/ofl/d/D.ttf".to_string(), "gfonts/c/ofl/d/D-Bold.ttf".to_string()])]);
+        request("Cloud Test D");
+        assert!(take_requests().iter().all(|(f, _)| f != "Cloud Test D"), "asked once");
+        failed("Cloud Test D");
+        request("Cloud Test D");
+        assert!(take_requests().iter().any(|(f, _)| f == "Cloud Test D"), "asked again after a failed fetch");
+    }
+
+    #[test]
+    fn text_asking_for_an_unloaded_cloud_family_requests_it() {
+        let _serial = SERIAL.lock().unwrap_or_else(PoisonError::into_inner);
+        add_manifest("Cloud Test E | Regular | gfonts/c/ofl/e/E.ttf\n");
+        // The fallback font draws the text meanwhile (or nothing, without bundled fonts).
+        let _ = crate::FontDb::global().face("Cloud Test E", "Regular");
+        assert!(take_requests().iter().any(|(f, _)| f == "Cloud Test E"));
+    }
+}
+'@
+$cloudFile = Join-Path $root "$vectorText/cloud.rs"
+$cloudText = $cloudRs.Replace("`r`n", "`n")
+$cloudNow = if (Test-Path $cloudFile) { [IO.File]::ReadAllText($cloudFile).Replace("`r`n", "`n") } else { '' }
+if ($cloudNow -ne $cloudText) { [IO.File]::WriteAllText($cloudFile, $cloudText, [Text.UTF8Encoding]::new($false)) }
+Insert-Before-Once "$vectorText/lib.rs" 'mod bitmap;' 'pub mod cloud;' 'pub mod cloud;'
+Replace-Exact "$vectorText/fontdb/db.rs" 'pub(super) fn changed(&self) {' 'pub(crate) fn changed(&self) {'
+Replace-Exact "$vectorText/fontdb/db.rs" '        v.extend(catalog.values().map(|c| c.name.clone()));' "        v.extend(catalog.values().map(|c| c.name.clone()));`n        v.extend(crate::cloud::families());"
+Replace-Exact "$vectorText/fontdb/lookup.rs" "        found`n            .or_else(|| self.find(FALLBACK_FAMILY, style))" "        if found.is_none() {`n            crate::cloud::request(family);`n        }`n        found`n            .or_else(|| self.find(FALLBACK_FAMILY, style))"
+Replace-Exact "$vectorText/fontdb/lookup.rs" 'self.is_loaded(&family) || self.read_catalog().contains_key(&family.to_ascii_lowercase())' 'self.is_loaded(&family) || self.read_catalog().contains_key(&family.to_ascii_lowercase()) || crate::cloud::contains(&family)'
+$cloudShell = @'
+
+/// VRAVIO: the cloud font catalog (`fonts/manifest.txt`, see `vectorcraft_text::cloud`). Most hosts
+/// serve none: a missing manifest is the normal case, not an error.
+pub fn spawn_cloud_catalog(ctx: egui::Context) {
+    wasm_bindgen_futures::spawn_local(async move {
+        let Ok(bytes) = fetch("fonts/manifest.txt", "", STARTUP_TIMEOUT_MS).await else { return };
+        let Ok(text) = String::from_utf8(bytes) else { return };
+        if vectorcraft_text::cloud::add_manifest(&text) > 0 {
+            ctx.request_repaint();
+        }
+    });
+}
+
+/// `gfonts/<commit>/<licence>/<family>/<file>` is a pinned file of google/fonts; other paths stay
+/// relative to the page.
+fn cloud_url(file: &str) -> String {
+    match file.strip_prefix("gfonts/") {
+        Some(rest) => format!("https://raw.githubusercontent.com/google/fonts/{rest}"),
+        None => file.to_string(),
+    }
+}
+
+/// Fetches the cloud families text asked for since the last frame and adds them to the font
+/// database. Called every frame.
+pub fn serve_cloud_fonts(ctx: &egui::Context) {
+    for (family, files) in vectorcraft_text::cloud::take_requests() {
+        let ctx = ctx.clone();
+        wasm_bindgen_futures::spawn_local(async move {
+            let mut loaded = false;
+            for file in files {
+                match fetch(&cloud_url(&file), "", BACKGROUND_TIMEOUT_MS).await {
+                    Ok(bytes) => loaded |= FontDb::global().add_font(bytes) > 0,
+                    Err(e) => log::warn!("cloud font {family}: {e}"),
+                }
+            }
+            if loaded {
+                ctx.request_repaint();
+            } else {
+                vectorcraft_text::cloud::failed(&family);
+            }
+        });
+    }
+}
+'@
+$vectorFonts = Join-Path $root 'upstream/vectorcraft/apps/vectorcraft-web/src/fonts.rs'
+$fontsSrc = [IO.File]::ReadAllText($vectorFonts).Replace("`r`n", "`n")
+if (-not $fontsSrc.Contains('pub fn spawn_cloud_catalog')) { [IO.File]::WriteAllText($vectorFonts, $fontsSrc.TrimEnd("`n") + "`n" + $cloudShell.Replace("`r`n", "`n"), [Text.UTF8Encoding]::new($false)) }
+Insert-After-Once $vectorWeb '                crate::fonts::spawn_background_fonts(ctx.clone());' 'spawn_cloud_catalog' '                crate::fonts::spawn_cloud_catalog(ctx.clone());'
+Insert-After-Once $vectorWeb '    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {' 'serve_cloud_fonts' '        crate::fonts::serve_cloud_fonts(ctx);'
+
 Write-Output 'VRAVIO branding applied to UI sources.'
