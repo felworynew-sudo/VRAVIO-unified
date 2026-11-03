@@ -1036,4 +1036,17 @@ Insert-Before-Once 'upstream/photocraft/crates/ui-egui/src/text/served_fonts.rs'
 Insert-Before-Once $rasterWeb '        served_fonts::add_fonts(&fonts);' 'served_fonts::add_classes(&text);' '        served_fonts::add_classes(&text);'
 Replace-Exact 'upstream/photocraft/crates/ui-egui/src/text/font_filters.rs' '    let generation = photocraft_text::fonts::shared_generation();' '    let generation = photocraft_text::fonts::shared_generation().wrapping_add(photocraft_text::served::generation() << 32);'
 Replace-Exact 'upstream/photocraft/crates/ui-egui/src/text/font_filters.rs' '.fonts.family_traits(family);' '.fonts.family_traits(family).or_else(|| super::served_fonts::served_traits(family));'
+# Draw again once served fonts are installed: the font menu's samples and the canvas preview of a
+# hovered cloud family otherwise wait for the next input event, so a still pointer shows nothing.
+$repaintOld = '        served_fonts::install(&mut self.app, ctx, arrived);'
+$repaintNew = @'
+        let installed = !arrived.is_empty();
+        served_fonts::install(&mut self.app, ctx, arrived);
+        if installed {
+            // VRAVIO: the font menu's samples and the canvas preview show the fonts on the next frames.
+            ctx.request_repaint();
+            ctx.request_repaint_after(std::time::Duration::from_millis(200));
+        }
+'@
+Replace-Exact $rasterWeb $repaintOld $repaintNew.TrimEnd("`r", "`n")
 Write-Output 'VRAVIO branding applied to UI sources.'
