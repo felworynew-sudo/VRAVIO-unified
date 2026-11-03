@@ -735,8 +735,11 @@ $cloudFetchOld = @'
 '@
 $cloudFetchNew = @'
     let window = web_sys::window().ok_or("no window")?;
-    // VRAVIO: `gfonts/<commit>/<licence>/<family>/<file>` is a pinned file of google/fonts (cloud font catalog).
-    let cloud = url.strip_prefix("gfonts/").map(|rest| format!("https://raw.githubusercontent.com/google/fonts/{rest}"));
+    // VRAVIO: `gfonts/<commit>/<licence>/<family>/<file>` is a pinned file of google/fonts (cloud font
+    // catalog); `fspreview/<id>/<subset>` a family's light preview (a Fontsource script subset).
+    let cloud = url.strip_prefix("gfonts/").map(|rest| format!("https://raw.githubusercontent.com/google/fonts/{rest}")).or_else(|| {
+        url.strip_prefix("fspreview/").and_then(|rest| rest.split_once('/')).map(|(id, subset)| format!("https://cdn.jsdelivr.net/fontsource/fonts/{id}@latest/{subset}-400-normal.woff"))
+    });
     let init = web_sys::RequestInit::new();
     init.set_mode(if cloud.is_some() { web_sys::RequestMode::Cors } else { web_sys::RequestMode::SameOrigin });
 '@
@@ -831,6 +834,11 @@ fn class_of(key: &str) -> Option<crate::FontClass> {
 /// A catalog family's class and format, as the manifest gives them (any case).
 pub fn traits(family: &str) -> Option<crate::FontTraits> {
     state().traits.iter().find(|(f, _)| f.eq_ignore_ascii_case(family)).map(|(_, t)| *t)
+}
+
+/// Whether `family` is a catalog family (`Some`), and then whether its files were added.
+pub fn download_state(family: &str) -> Option<bool> {
+    contains(family).then(|| crate::FontDb::global().is_loaded(family))
 }
 
 /// The families the catalog lists.
@@ -941,7 +949,19 @@ $cloudNow = if (Test-Path $cloudFile) { [IO.File]::ReadAllText($cloudFile).Repla
 if ($cloudNow -ne $cloudText) { [IO.File]::WriteAllText($cloudFile, $cloudText, [Text.UTF8Encoding]::new($false)) }
 Insert-Before-Once "$vectorText/lib.rs" 'mod bitmap;' 'pub mod cloud;' 'pub mod cloud;'
 Replace-Exact "$vectorText/fontdb/db.rs" 'pub(super) fn changed(&self) {' 'pub(crate) fn changed(&self) {'
-Replace-Exact "$vectorText/fontdb/db.rs" '        v.extend(catalog.values().map(|c| c.name.clone()));' "        v.extend(catalog.values().map(|c| c.name.clone()));`n        v.extend(crate::cloud::families());"
+$familyListOld = @'
+        v.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
+        let list: Arc<[String]> = v.into();
+'@
+$familyListNew = @'
+        v.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
+        // VRAVIO: the cloud catalog's families after the installed ones (a downloaded one is installed).
+        let mut cloud: Vec<String> = crate::cloud::families().into_iter().filter(|f| !v.iter().any(|g| g.eq_ignore_ascii_case(f))).collect();
+        cloud.sort_by_key(|a| a.to_lowercase());
+        v.extend(cloud);
+        let list: Arc<[String]> = v.into();
+'@
+Replace-Exact "$vectorText/fontdb/db.rs" $familyListOld.TrimEnd("`r", "`n") $familyListNew.TrimEnd("`r", "`n")
 Replace-Exact "$vectorText/fontdb/lookup.rs" "        found`n            .or_else(|| self.find(FALLBACK_FAMILY, style))" "        if found.is_none() {`n            crate::cloud::request(family);`n        }`n        found`n            .or_else(|| self.find(FALLBACK_FAMILY, style))"
 Replace-Exact "$vectorText/fontdb/lookup.rs" 'self.is_loaded(&family) || self.read_catalog().contains_key(&family.to_ascii_lowercase())' 'self.is_loaded(&family) || self.read_catalog().contains_key(&family.to_ascii_lowercase()) || crate::cloud::contains(&family)'
 $cloudShell = @'
@@ -996,10 +1016,10 @@ Insert-After-Once $vectorWeb '                crate::fonts::spawn_background_fon
 Insert-After-Once $vectorWeb '    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {' 'serve_cloud_fonts' '        crate::fonts::serve_cloud_fonts(ctx);'
 
 Insert-After-Once 'upstream/vectorcraft/crates/ui-egui/src/font_menu.rs' '    let key: Key = (family.to_string(), style.unwrap_or("Regular").to_string(), sample.unwrap_or_default().to_string(), px);' 'cloud::pending(family)' @'
-    // VRAVIO: a cloud family still downloading has no sample yet (the lookup below asks for it); a
-    // sample set in the fallback font would be kept once it arrives.
+    // VRAVIO: a cloud family not downloaded yet has no sample (its row shows a cloud): drawing one
+    // would download the whole family for a row the user may never pick, and a sample set in the
+    // fallback font would be kept once it arrives.
     if vectorcraft_text::cloud::pending(family) {
-        let _ = vectorcraft_text::FontDb::global().face(family, style.unwrap_or("Regular"));
         return None;
     }
 '@
@@ -1049,4 +1069,412 @@ $repaintNew = @'
         }
 '@
 Replace-Exact $rasterWeb $repaintOld $repaintNew.TrimEnd("`r", "`n")
+# Raster font menu: a cloud filter button beside the others, icons instead of the format badges
+# (a cloud for a cloud font not downloaded yet, a check once it is, the variable-font mark), and
+# the installed families listed before the cloud catalog's.
+$rasterFonts = 'upstream/photocraft/crates/ui-egui/src/text/served_fonts.rs'
+$rasterFilters = 'upstream/photocraft/crates/ui-egui/src/text/font_filters.rs'
+$rasterMenu = 'upstream/photocraft/crates/ui-egui/src/tools/type_tool/fonts.rs'
+$cloudState = @'
+/// VRAVIO: the cloud families downloaded this session (their files installed).
+static DOWNLOADED: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+fn remember_downloaded(families: &[String]) {
+    let mut downloaded = DOWNLOADED.lock().unwrap_or_else(PoisonError::into_inner);
+    for f in families {
+        if !downloaded.contains(f) {
+            downloaded.push(f.clone());
+        }
+    }
+}
+
+/// Whether `family` is a cloud catalog family (`Some`), and then whether its files were downloaded.
+/// `None` for the bundled and installed fonts.
+pub fn cloud_state(family: &str) -> Option<bool> {
+    let listed = CLASSES.lock().unwrap_or_else(PoisonError::into_inner).iter().any(|(n, _)| n == family);
+    listed.then(|| DOWNLOADED.lock().unwrap_or_else(PoisonError::into_inner).iter().any(|n| n == family))
+}
+
+'@
+Insert-Before-Once $rasterFonts '#[cfg(test)]' 'pub fn cloud_state' $cloudState
+Insert-After-Once $rasterFonts '        let families: Vec<String> = delivered.iter().map(|(f, _)| f.clone()).collect();' 'remember_downloaded(&families);' '        remember_downloaded(&families);'
+Insert-After-Once $rasterFilters '    pub hide_classes: bool,' 'pub cloud: bool,' "    /// VRAVIO: only the cloud catalog's fonts (downloaded or not).`n    pub cloud: bool,"
+Replace-Exact $rasterFilters '        self.class.is_some() || self.favorites || self.variable || self.similar' '        self.class.is_some() || self.favorites || self.variable || self.similar || self.cloud'
+Insert-Before-Once $rasterFilters '    if filters.favorites {' 'if filters.cloud {' "    if filters.cloud {`n        rows.retain(|(f, _)| super::served_fonts::cloud_state(f).is_some());`n    }"
+$cloudButton = @'
+    // VRAVIO: the cloud catalog's fonts alone, downloaded (a check) or not (a cloud).
+    if crate::icons::button(ui, "cloud", 22.0, filters.cloud, tl!("Show Cloud Fonts")).clicked() {
+        filters.cloud = !filters.cloud;
+    }
+'@
+Insert-Before-Once $rasterFilters '    *filters != before' 'tl!("Show Cloud Fonts")' $cloudButton.TrimEnd("`r", "`n")
+$badgeOld = @'
+                        // The format badge (O, TT, VAR) just left of the sample.
+                        if let Some(format) = format {
+                            let center = egui::pos2(response.rect.right() - 8.0 - slot - FONT_BADGE_WIDTH / 2.0, response.rect.center().y);
+                            let t = crate::theme::Tokens::get(ui.ctx());
+                            ui.painter().text(center, egui::Align2::CENTER_CENTER, format.badge(), egui::FontId::proportional(10.0), t.text_dim);
+                            let tip = egui::Rect::from_center_size(center, egui::vec2(FONT_BADGE_WIDTH, 14.0));
+                            ui.interact(tip, ui.scope_id().with(("font-format", f, recent_row)), egui::Sense::hover())
+                                .on_hover_text(crate::font_filters::format_tip(format));
+                        }
+'@
+$badgeNew = @'
+                        // VRAVIO: an icon just left of the sample instead of the format badge (O, TT,
+                        // VAR): a cloud for a cloud font not downloaded yet, a check once it is, the
+                        // variable-font mark for an installed variable font; none for other fonts.
+                        let badge = match (visible.then(|| crate::text::served_fonts::cloud_state(f)).flatten(), format) {
+                            (Some(false), _) => Some(("cloud", tl!("Cloud font: downloads when you pick it"))),
+                            (Some(true), _) => Some(("check", tl!("Cloud font, downloaded"))),
+                            (None, Some(photocraft_text::FontFormat::Variable)) => Some(("font-variable", tl!("Variable font: its weight can be set freely"))),
+                            _ => None,
+                        };
+                        if let Some((icon, tip_text)) = badge {
+                            let center = egui::pos2(response.rect.right() - 8.0 - slot - FONT_BADGE_WIDTH / 2.0, response.rect.center().y);
+                            let t = crate::theme::Tokens::get(ui.ctx());
+                            let tip = egui::Rect::from_center_size(center, egui::vec2(FONT_BADGE_WIDTH, 14.0));
+                            crate::icons::paint(ui, tip, icon, 13.0, t.text_dim);
+                            ui.interact(tip, ui.scope_id().with(("font-format", f, recent_row)), egui::Sense::hover()).on_hover_text(tip_text);
+                        }
+'@
+Replace-Exact $rasterMenu $badgeOld.TrimEnd("`r", "`n") $badgeNew.TrimEnd("`r", "`n")
+$orderOld = @'
+    for f in photocraft_text::served::families() {
+        if !v.contains(&f) {
+            v.push(f);
+        }
+    }
+    v.sort_by_key(|s| s.to_lowercase());
+'@
+$orderNew = @'
+    // VRAVIO: the installed families (bundled, system, downloaded) first, then the cloud catalog's.
+    v.sort_by_key(|s| s.to_lowercase());
+    let installed = v.len();
+    for f in photocraft_text::served::families() {
+        if !v.contains(&f) {
+            v.push(f);
+        }
+    }
+    if let Some(cloud) = v.get_mut(installed..) {
+        cloud.sort_by_key(|s| s.to_lowercase());
+    }
+'@
+Replace-Exact $rasterMenu $orderOld.TrimEnd("`r", "`n") $orderNew.TrimEnd("`r", "`n")
+# Russian labels for the cloud font strings.
+$rasterRu = Join-Path $root 'upstream/photocraft/crates/ui-egui/src/i18n/ru.tsv'
+$ruText = [IO.File]::ReadAllText($rasterRu)
+$ruAdd = ''
+foreach ($pair in @(
+  @('Show Cloud Fonts', 'Показать шрифты из облака'),
+  @('Cloud font: downloads when you pick it', 'Шрифт из облака: скачается при выборе'),
+  @('Cloud font, downloaded', 'Шрифт из облака, скачан'),
+  @('Variable font: its weight can be set freely', 'Вариативный шрифт: толщину можно менять плавно')
+)) {
+  if (-not $ruText.Contains("`t$($pair[0])`t")) { $ruAdd += "`t$($pair[0])`t$($pair[1])`n" }
+}
+if ($ruAdd -ne '') { [IO.File]::WriteAllText($rasterRu, $ruText.TrimEnd("`r", "`n") + "`n" + $ruAdd, [Text.UTF8Encoding]::new($false)) }
+# Style rows of an expanded family read from the left, as the family rows do (an empty right part
+# keeps the label at the start instead of centred).
+Replace-Exact $rasterMenu 'egui::Button::selectable(false, style_label(style)).truncate().stroke(egui::Stroke::NONE),' 'egui::Button::selectable(false, style_label(style)).right_text("").truncate().stroke(egui::Stroke::NONE),'
+# Vector font menu: a Cloud chip beside the favourites chip, and each cloud family's mark before
+# its star (a cloud until it is downloaded, a check after).
+$vectorMenu = 'upstream/vectorcraft/crates/ui-egui/src/font_menu.rs'
+Insert-After-Once $vectorMenu '    favorites_only: bool,' 'cloud_only: bool,' "    /// VRAVIO: only the cloud catalog's families.`n    cloud_only: bool,"
+Replace-Exact $vectorMenu 'type RowsKey = (String, usize, Option<FontClass>, bool, bool, bool, Vec<String>, Vec<String>, Vec<String>, u64);' 'type RowsKey = (String, usize, Option<FontClass>, bool, bool, bool, Vec<String>, Vec<String>, Vec<String>, u64, bool);'
+Replace-Exact $vectorMenu "        db.generation(),`n    );" "        db.generation(),`n        st.cloud_only,`n    );"
+$cloudChip = @'
+        if ui.selectable_label(st.cloud_only, egui::RichText::new(tl!("Cloud")).size(11.0)).on_hover_text(tl!("Show Cloud Fonts")).clicked() {
+            st.cloud_only = !st.cloud_only;
+            refilter = true;
+        }
+'@
+Insert-Before-Once $vectorMenu '        if ui.selectable_label(st.class.is_none(), egui::RichText::new(tl!("Any Kind")).size(11.0)).clicked() {' 'tl!("Show Cloud Fonts")' $cloudChip.TrimEnd("`r", "`n")
+$wantedOld = @'
+            if st.favorites_only && !favorite(f) {
+                return false;
+            }
+'@
+$wantedNew = @'
+            if st.favorites_only && !favorite(f) {
+                return false;
+            }
+            if st.cloud_only && !vectorcraft_text::cloud::contains(f) {
+                return false;
+            }
+'@
+Replace-Exact $vectorMenu $wantedOld.TrimEnd("`r", "`n") $wantedNew.TrimEnd("`r", "`n")
+$markOld = '        let sample_rect = egui::Rect::from_min_max(rect.min + vec2(name_w, 2.0), rect.max - vec2(STAR + 2.0, 2.0));'
+$markNew = @'
+        // VRAVIO: a cloud family's mark just before the star (a cloud until it is downloaded, a check
+        // after); the sample makes room for it.
+        let cloud = if let Row::Family(f) = row { vectorcraft_text::cloud::download_state(f) } else { None };
+        let mark_w = if cloud.is_some() { 18.0 } else { 0.0 };
+        if let Some(downloaded) = cloud {
+            let mark = egui::Rect::from_center_size(egui::pos2(star.min.x - 10.0, rect.center().y), vec2(14.0, 14.0));
+            if downloaded {
+                let a = mark.left_center() + vec2(2.0, 0.0);
+                let b = mark.center_bottom() + vec2(-1.0, -3.0);
+                let c = mark.right_top() + vec2(-2.0, 3.0);
+                p.line_segment([a, b], egui::Stroke::new(1.5, t.text_dim));
+                p.line_segment([b, c], egui::Stroke::new(1.5, t.text_dim));
+            } else {
+                crate::icons::paint(ui, "cloud", mark, t.text_dim);
+            }
+            let tip = if downloaded { tl!("Cloud font, downloaded") } else { tl!("Cloud font: downloads when you pick it") };
+            ui.interact(mark, ui.scope_id().with(("vravio-cloud-mark", i)), Sense::hover()).on_hover_text(tip);
+        }
+        let sample_rect = egui::Rect::from_min_max(rect.min + vec2(name_w, 2.0), rect.max - vec2(STAR + 2.0 + mark_w, 2.0));
+'@
+Replace-Exact $vectorMenu $markOld $markNew.TrimEnd("`r", "`n")
+$vectorRu = Join-Path $root 'upstream/vectorcraft/crates/ui-egui/src/i18n/ru.tsv'
+$vruText = [IO.File]::ReadAllText($vectorRu)
+$vruAdd = ''
+foreach ($pair in @(
+  @('Cloud', 'Облако'),
+  @('Show Cloud Fonts', 'Показать шрифты из облака'),
+  @('Cloud font: downloads when you pick it', 'Шрифт из облака: скачается при выборе'),
+  @('Cloud font, downloaded', 'Шрифт из облака, скачан')
+)) {
+  if (-not $vruText.Contains("`t$($pair[0])`t")) { $vruAdd += "`t$($pair[0])`t$($pair[1])`n" }
+}
+if ($vruAdd -ne '') { [IO.File]::WriteAllText($vectorRu, $vruText.TrimEnd("`r", "`n") + "`n" + $vruAdd, [Text.UTF8Encoding]::new($false)) }
+# Vector font menu: hovering a cloud family not downloaded yet ends the canvas preview instead of
+# previewing it (which would download the whole family); picking it downloads it.
+Insert-Before-Once $vectorMenu '        Some(pick) if st.previewed.as_ref() != Some(&pick) => {' 'cloud::pending(&f) =>' '        Some((f, _)) if vectorcraft_text::cloud::pending(&f) => st.previewed.take().map(|_| FontPick::EndPreview),'
+# Raster: light previews of cloud families. The font menu's samples, its preview line and the
+# canvas preview of a hovered cloud family use a script subset of it (Fontsource, 15-40 KB, latin or
+# cyrillic), registered under a hidden alias; the whole family downloads only once it is picked.
+$rasterTextFonts = 'upstream/photocraft/crates/text/src/fonts.rs'
+$registerAs = @'
+
+    /// VRAVIO: registers font data (TTF/OTF, or a WOFF 1.0 file) under `family`, whatever its own
+    /// name: the font menu's light previews of cloud families, kept apart from the families
+    /// themselves (a leading '.' keeps the alias out of the font lists). Returns the families added.
+    pub fn register_font_data_as(&mut self, bytes: Vec<u8>, family: &str) -> Vec<String> {
+        let bytes = if bytes.starts_with(b"wOFF") {
+            let Some(sfnt) = woff_to_sfnt(&bytes) else { return Vec::new() };
+            sfnt
+        } else {
+            bytes
+        };
+        self.register_blob(Blob::new(Arc::new(bytes)), Some(family))
+    }
+'@
+Insert-After-Once $rasterTextFonts "    pub fn register_font_data(&mut self, bytes: Vec<u8>) -> Vec<String> {`n        self.register_blob(Blob::new(Arc::new(bytes)), None)`n    }" 'pub fn register_font_data_as' $registerAs.TrimEnd("`r", "`n")
+$woff = @'
+/// VRAVIO: a WOFF 1.0 file's font data (TTF/OTF): its tables, each zlib-compressed or stored,
+/// behind a 44-byte header. `None` when `d` isn't a well-formed WOFF file.
+fn woff_to_sfnt(d: &[u8]) -> Option<Vec<u8>> {
+    const MAX_OUT: usize = 64 << 20;
+    let be32 = |o: usize| -> Option<u32> { Some(u32::from_be_bytes(d.get(o..o.checked_add(4)?)?.try_into().ok()?)) };
+    let be16 = |o: usize| -> Option<u16> { Some(u16::from_be_bytes(d.get(o..o.checked_add(2)?)?.try_into().ok()?)) };
+    if d.get(..4)? != b"wOFF" {
+        return None;
+    }
+    let flavor = be32(4)?;
+    let n = usize::from(be16(12)?);
+    if n == 0 || n > 256 {
+        return None;
+    }
+    let mut tables = Vec::with_capacity(n);
+    let mut total = 12 + 16 * n;
+    for i in 0..n {
+        let e = 44 + 20 * i;
+        let tag = d.get(e..e + 4)?;
+        let (off, comp, orig, sum) = (be32(e + 4)? as usize, be32(e + 8)? as usize, be32(e + 12)? as usize, be32(e + 16)?);
+        let raw = d.get(off..off.checked_add(comp)?)?;
+        let data = if comp < orig {
+            let mut out = Vec::with_capacity(orig.min(MAX_OUT));
+            let mut reader = std::io::Read::take(flate2::read::ZlibDecoder::new(raw), orig as u64 + 1);
+            std::io::Read::read_to_end(&mut reader, &mut out).ok()?;
+            if out.len() != orig {
+                return None;
+            }
+            out
+        } else if comp == orig {
+            raw.to_vec()
+        } else {
+            return None;
+        };
+        total = total.checked_add(data.len().checked_add(3)? & !3)?;
+        if total > MAX_OUT {
+            return None;
+        }
+        tables.push((tag.to_vec(), sum, data));
+    }
+    let mut selector = 0u16;
+    while (1usize << (selector + 1)) <= n {
+        selector += 1;
+    }
+    let range = 16u16 << selector;
+    let count = u16::try_from(n).ok()?;
+    let mut out = Vec::with_capacity(total);
+    out.extend_from_slice(&flavor.to_be_bytes());
+    out.extend_from_slice(&count.to_be_bytes());
+    out.extend_from_slice(&range.to_be_bytes());
+    out.extend_from_slice(&selector.to_be_bytes());
+    out.extend_from_slice(&(count * 16 - range).to_be_bytes());
+    let mut offset = 12 + 16 * n;
+    for (tag, sum, data) in &tables {
+        out.extend_from_slice(tag);
+        out.extend_from_slice(&sum.to_be_bytes());
+        out.extend_from_slice(&u32::try_from(offset).ok()?.to_be_bytes());
+        out.extend_from_slice(&u32::try_from(data.len()).ok()?.to_be_bytes());
+        offset += (data.len() + 3) & !3;
+    }
+    for (_, _, data) in &tables {
+        out.extend_from_slice(data);
+        out.resize((out.len() + 3) & !3, 0);
+    }
+    Some(out)
+}
+
+'@
+Insert-Before-Once $rasterTextFonts 'pub fn is_hidden_family(name: &str) -> bool {' 'fn woff_to_sfnt(' $woff
+$previews = @'
+/// VRAVIO: light previews of cloud families (the font menu's samples, its preview line and the
+/// canvas preview of a hovered family): a script subset of the family (latin or cyrillic, from
+/// Fontsource), registered under a hidden alias, so the whole family downloads only once picked.
+struct Previews {
+    /// Each catalog family's Fontsource id (the manifest's 10th field).
+    ids: Vec<(String, String)>,
+    /// Subsets asked for, `(family, subset)`; `wanted` are those the web shell hasn't taken yet.
+    asked: Vec<(String, &'static str)>,
+    wanted: Vec<(String, &'static str)>,
+    /// Subsets that arrived, waiting to be registered.
+    arrived: Vec<(String, &'static str, Vec<u8>)>,
+    /// Subsets registered.
+    loaded: Vec<(String, &'static str)>,
+}
+
+static PREVIEWS: Mutex<Previews> = Mutex::new(Previews { ids: Vec::new(), asked: Vec::new(), wanted: Vec::new(), arrived: Vec::new(), loaded: Vec::new() });
+
+/// Reads the Fontsource ids of a served font manifest (its 10th field).
+pub fn add_previews(manifest: &str) {
+    let mut p = PREVIEWS.lock().unwrap_or_else(PoisonError::into_inner);
+    for line in manifest.lines() {
+        let f: Vec<&str> = line.split(" | ").map(str::trim).collect();
+        let (Some(family), Some(id)) = (f.first(), f.get(9)) else { continue };
+        let valid = !id.is_empty() && id.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-');
+        if family.starts_with('#') || !valid || p.ids.iter().any(|(n, _)| n == family) {
+            continue;
+        }
+        p.ids.push((family.to_string(), id.to_string()));
+    }
+}
+
+fn preview_alias(family: &str, subset: &str) -> String {
+    format!(".VRAVIO Preview {subset} {family}")
+}
+
+/// The family to draw `text` set in `family` with: the family itself unless it is a cloud family
+/// not downloaded yet, else its light preview for the text's script once that arrived (asked for
+/// here; until then nothing is drawn).
+pub fn shown_family(family: &str, text: &str) -> String {
+    if cloud_state(family) != Some(false) {
+        return family.to_string();
+    }
+    let subset = if text.chars().any(|c| ('\u{0400}'..='\u{04FF}').contains(&c)) { "cyrillic" } else { "latin" };
+    let mut p = PREVIEWS.lock().unwrap_or_else(PoisonError::into_inner);
+    let key = (family.to_string(), subset);
+    if p.loaded.contains(&key) {
+        return preview_alias(family, subset);
+    }
+    if !p.asked.contains(&key) && p.ids.iter().any(|(n, _)| n == family) {
+        p.asked.push(key.clone());
+        p.wanted.push(key);
+    }
+    family.to_string()
+}
+
+/// The light previews asked for since the last call, `(family, subset, path)`; the path is read by
+/// the web shell's fetch (`fspreview/<id>/<subset>`).
+pub fn take_preview_requests() -> Vec<(String, &'static str, String)> {
+    let mut p = PREVIEWS.lock().unwrap_or_else(PoisonError::into_inner);
+    let wanted = std::mem::take(&mut p.wanted);
+    wanted
+        .into_iter()
+        .filter_map(|(family, subset)| {
+            let id = p.ids.iter().find(|(n, _)| *n == family)?.1.clone();
+            Some((family, subset, format!("fspreview/{id}/{subset}")))
+        })
+        .collect()
+}
+
+/// A light preview the web shell fetched.
+pub fn preview_arrived(family: String, subset: &'static str, bytes: Vec<u8>) {
+    PREVIEWS.lock().unwrap_or_else(PoisonError::into_inner).arrived.push((family, subset, bytes));
+}
+
+/// Registers the light previews that arrived. True when any did: the menu draws them next.
+pub fn install_previews() -> bool {
+    let arrived = std::mem::take(&mut PREVIEWS.lock().unwrap_or_else(PoisonError::into_inner).arrived);
+    if arrived.is_empty() {
+        return false;
+    }
+    let mut done = Vec::new();
+    {
+        let mut eng = photocraft_text::shared().lock().unwrap_or_else(PoisonError::into_inner);
+        for (family, subset, bytes) in arrived {
+            if eng.fonts.register_font_data_as(bytes, &preview_alias(&family, subset)).is_empty() {
+                log::warn!("the {subset} preview of {family:?} is not a readable font");
+            } else {
+                done.push((family, subset));
+            }
+        }
+    }
+    PREVIEWS.lock().unwrap_or_else(PoisonError::into_inner).loaded.extend(done);
+    true
+}
+
+'@
+Insert-Before-Once $rasterFonts '#[cfg(test)]' 'pub fn shown_family' $previews
+Insert-Before-Once $rasterWeb '        served_fonts::add_fonts(&fonts);' 'served_fonts::add_previews(&text);' '        served_fonts::add_previews(&text);'
+$previewFetch = @'
+        // VRAVIO: the light previews of cloud families the font menu asked for.
+        for (family, subset, path) in served_fonts::take_preview_requests() {
+            let ctx = ctx.clone();
+            wasm_bindgen_futures::spawn_local(async move {
+                match fetch_bytes(&path, None).await {
+                    Ok(bytes) => {
+                        served_fonts::preview_arrived(family, subset, bytes);
+                        ctx.request_repaint();
+                    }
+                    Err(e) => log::warn!("couldn't fetch the preview of {family}: {e}"),
+                }
+            });
+        }
+        if served_fonts::install_previews() {
+            ctx.request_repaint();
+        }
+'@
+Insert-Before-Once $rasterWeb '        let installed = !arrived.is_empty();' 'served_fonts::take_preview_requests()' $previewFetch.TrimEnd("`r", "`n")
+$rasterPreview = 'upstream/photocraft/crates/ui-egui/src/text/font_preview.rs'
+Insert-After-Once $rasterPreview 'pub(crate) fn paint(ui: &egui::Ui, family: &str, row: Rect, size: f32) {' 'shown_family(family, SAMPLE)' "    // VRAVIO: a cloud family not downloaded yet is drawn from its light preview.`n    let family = &super::served_fonts::shown_family(family, SAMPLE);"
+Insert-After-Once $rasterPreview 'pub(crate) fn paint_text(ui: &egui::Ui, family: &str, text: &str, rect: Rect, size: f32) {' 'shown_family(family, text)' "    // VRAVIO: a cloud family not downloaded yet is drawn from its light preview.`n    let family = &super::served_fonts::shown_family(family, text);"
+$typePreview = 'upstream/photocraft/crates/ui-egui/src/tools/type_font_preview.rs'
+$setOld = '    photocraft_text::served::request(&family);'
+$setNew = @'
+    // VRAVIO: a cloud family not downloaded yet is previewed from its light preview
+    // (`display_doc`); its files download when it is picked.
+    if crate::text::served_fonts::cloud_state(&family) != Some(false) {
+        photocraft_text::served::request(&family);
+    }
+'@
+Replace-Exact $typePreview $setOld $setNew.TrimEnd("`r", "`n")
+$displayOld = @'
+    if !photocraft_text::shared().lock().unwrap_or_else(|e| e.into_inner()).fonts.has_family(family) {
+        return None;
+    }
+'@
+$displayNew = @'
+    // VRAVIO: a cloud family not downloaded yet is previewed from its light preview for the layer's script.
+    let layer_text = st.doc.layer(p.layer).and_then(|l| if let LayerContent::Text(t) = &l.content { Some(t.text.clone()) } else { None }).unwrap_or_default();
+    let shown_family = crate::text::served_fonts::shown_family(family, &layer_text);
+    let family = shown_family.as_str();
+    if !photocraft_text::shared().lock().unwrap_or_else(|e| e.into_inner()).fonts.has_family(family) {
+        return None;
+    }
+'@
+Replace-Exact $typePreview $displayOld.TrimEnd("`r", "`n") $displayNew.TrimEnd("`r", "`n")
 Write-Output 'VRAVIO branding applied to UI sources.'
