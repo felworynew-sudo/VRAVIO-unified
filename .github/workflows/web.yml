@@ -31,18 +31,57 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
+      # Apply the VRAVIO patches first so the cache key covers the sources trunk would actually build.
+      - name: Apply VRAVIO patches
+        shell: pwsh
+        run: ./brand-editors.ps1
+      - name: Hash editor sources
+        id: src
+        shell: bash
+        run: |
+          repo="upstream/${{ matrix.repo }}"
+          hash=$(
+            {
+              echo "kind=${{ matrix.kind }} trunk=latest wasm-bindgen=0.2.129"
+              rustc -V
+              git -C "$repo" rev-parse HEAD
+              git -C "$repo" submodule status --recursive
+              git -C "$repo" diff HEAD --binary
+              git -C "$repo" ls-files -z --others --exclude-standard | (cd "$repo" && xargs -0 -r sha256sum)
+              sha256sum build-editor.ps1 font-catalog/manifest.txt                 src-tauri/icons/icon.png src-tauri/icons/32x32.png src-tauri/icons/128x128@2x.png                 "assets/логотип цветная плашка.svg"
+            } | sha256sum | cut -c1-40
+          )
+          echo "key=web-editor-${{ matrix.kind }}-$hash" >> "$GITHUB_OUTPUT"
+          echo "Editor source key: web-editor-${{ matrix.kind }}-$hash"
+      - name: Restore built editor
+        id: cache
+        uses: actions/cache/restore@v4
+        with:
+          path: dist/editors/${{ matrix.kind }}
+          key: ${{ steps.src.outputs.key }}
       - uses: Swatinem/rust-cache@v2
+        if: steps.cache.outputs.cache-hit != 'true'
         with:
           workspaces: upstream/${{ matrix.repo }}
       - name: Install Trunk
-        if: matrix.kind != 'video'
+        if: steps.cache.outputs.cache-hit != 'true' && matrix.kind != 'video'
         run: cargo install trunk --locked
       - name: Install wasm-bindgen
-        if: matrix.kind == 'video'
+        if: steps.cache.outputs.cache-hit != 'true' && matrix.kind == 'video'
         run: cargo install wasm-bindgen-cli --version 0.2.129 --locked
       - name: Build editor
+        if: steps.cache.outputs.cache-hit != 'true'
         shell: pwsh
         run: ./build-editor.ps1 -Kind ${{ matrix.kind }}
+      - name: Save built editor
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: dist/editors/${{ matrix.kind }}
+          key: ${{ steps.src.outputs.key }}
+      - name: Check editor bundle
+        shell: bash
+        run: test -f "dist/editors/${{ matrix.kind }}/index.html"
       - uses: actions/upload-artifact@v4
         with:
           name: editor-${{ matrix.kind }}
