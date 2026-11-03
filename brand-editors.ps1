@@ -769,6 +769,9 @@ struct State {
     /// Families whose files couldn't be fetched: not asked for again this session (a font menu
     /// draws its rows every frame, and would ask again each time).
     failed: HashSet<String>,
+    /// Each family's class (the manifest's 9th field) and format, for the font menu's filters
+    /// before its files arrive.
+    traits: HashMap<String, crate::FontTraits>,
 }
 
 static STATE: LazyLock<Mutex<State>> = LazyLock::new(|| Mutex::new(State::default()));
@@ -777,8 +780,9 @@ fn state() -> MutexGuard<'static, State> {
     STATE.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-/// Lists the families of a manifest (`family | style | file`; `#` comments and malformed lines are
-/// skipped). Returns how many new families were added; the font menus refresh when it is above 0.
+/// Lists the families of a manifest (`family | style | file | … | class`; `#` comments and
+/// malformed lines are skipped; the 9th field is a font class key such as `sansSerif`). Returns how
+/// many new families were added; the font menus refresh when it is above 0.
 pub fn add_manifest(text: &str) -> usize {
     let mut added = 0;
     {
@@ -800,12 +804,33 @@ pub fn add_manifest(text: &str) -> usize {
                 added += 1;
             }
             entry.push(file.to_string());
+            // A `[axes]` file name (percent-encoded) is a variable font.
+            if let Some(class) = fields.nth(5).and_then(class_of) {
+                s.traits.entry(family.to_string()).or_insert(crate::FontTraits { class, variable: file.contains("%5B"), ..Default::default() });
+            }
         }
     }
     if added > 0 {
         crate::FontDb::global().changed();
     }
     added
+}
+
+/// The font menu class of a manifest class key.
+fn class_of(key: &str) -> Option<crate::FontClass> {
+    Some(match key {
+        "serif" | "slabSerif" => crate::FontClass::Serif,
+        "sansSerif" => crate::FontClass::Sans,
+        "monospace" => crate::FontClass::Monospaced,
+        "script" | "handwritten" => crate::FontClass::Script,
+        "decorative" | "blackletter" => crate::FontClass::Decorative,
+        _ => return None,
+    })
+}
+
+/// A catalog family's class and format, as the manifest gives them (any case).
+pub fn traits(family: &str) -> Option<crate::FontTraits> {
+    state().traits.iter().find(|(f, _)| f.eq_ignore_ascii_case(family)).map(|(_, t)| *t)
 }
 
 /// The families the catalog lists.
@@ -867,13 +892,18 @@ mod tests {
     #[test]
     fn a_manifest_lists_its_families_once_and_skips_bad_lines() {
         let added = add_manifest(
-            "# comment\nCloud Test A | Regular | gfonts/c/ofl/a/A.ttf\nCloud Test A | Bold | gfonts/c/ofl/a/A-Bold.ttf\nbroken line\nCloud Test B | Regular | /etc/passwd\nCloud Test C | Regular | gfonts/../x.ttf\n",
+            "# comment\nCloud Test A | Regular | gfonts/c/ofl/a/A%5Bwght%5D.ttf |  |  |  |  |  | sansSerif\nCloud Test A | Bold | gfonts/c/ofl/a/A-Bold.ttf\nbroken line\nCloud Test B | Regular | /etc/passwd\nCloud Test C | Regular | gfonts/../x.ttf\n",
         );
         assert_eq!(added, 1);
         assert!(contains("cloud test a"));
         assert!(!contains("Cloud Test B") && !contains("Cloud Test C"));
         assert!(crate::FontDb::global().families().iter().any(|f| f == "Cloud Test A"), "the font menus list it");
         assert!(crate::FontDb::global().has_family("Cloud Test A"), "a document naming it isn't missing a font");
+        let sans = crate::FontTraits { class: crate::FontClass::Sans, variable: true, ..Default::default() };
+        assert_eq!(traits("cloud test a"), Some(sans));
+        assert_eq!(crate::FontDb::global().family_traits("Cloud Test A"), sans, "the menu filters see its class before it is fetched");
+        assert_eq!(class_of("handwritten"), Some(crate::FontClass::Script));
+        assert_eq!(class_of("nonsense"), None);
     }
 
     #[test]
@@ -973,4 +1003,37 @@ Insert-After-Once 'upstream/vectorcraft/crates/ui-egui/src/font_menu.rs' '    le
         return None;
     }
 '@
+# Font menu class filters for cloud families before their files arrive: the class from the
+# manifest's 9th field, the format from the file name.
+Replace-Exact "$vectorText/fontdb/lookup.rs" '            None => scanned(&self.read_catalog()).unwrap_or_default(),' '            None => scanned(&self.read_catalog()).or_else(|| crate::cloud::traits(family)).unwrap_or_default(),'
+$servedClasses = @'
+/// VRAVIO: the class and format of the cloud catalog's families, from the manifest's 9th field (a
+/// `FontClass` key) and file name (a `[axes]` file is variable), so the font menu's class filters
+/// list them before their files are fetched.
+static CLASSES: Mutex<Vec<(String, photocraft_text::FamilyTraits)>> = Mutex::new(Vec::new());
+
+/// Reads the classes of a served font manifest (see [`CLASSES`]).
+pub fn add_classes(manifest: &str) {
+    let mut classes = CLASSES.lock().unwrap_or_else(PoisonError::into_inner);
+    for line in manifest.lines() {
+        let f: Vec<&str> = line.split(" | ").map(str::trim).collect();
+        let (Some(family), Some(file), Some(class)) = (f.first(), f.get(2), f.get(8).and_then(|k| photocraft_text::FontClass::from_key(k))) else { continue };
+        if family.starts_with('#') || classes.iter().any(|(n, _)| n == family) {
+            continue;
+        }
+        let format = if file.contains("%5B") { photocraft_text::FontFormat::Variable } else { photocraft_text::FontFormat::TrueType };
+        classes.push((family.to_string(), photocraft_text::FamilyTraits { class: Some(class), format, panose: [0; 10], weight: 400 }));
+    }
+}
+
+/// A served family's traits from the manifest, until its fonts are installed.
+pub fn served_traits(family: &str) -> Option<photocraft_text::FamilyTraits> {
+    CLASSES.lock().unwrap_or_else(PoisonError::into_inner).iter().find(|(n, _)| n == family).map(|(_, t)| t.clone())
+}
+
+'@
+Insert-Before-Once 'upstream/photocraft/crates/ui-egui/src/text/served_fonts.rs' '#[cfg(test)]' 'pub fn add_classes' $servedClasses
+Insert-Before-Once $rasterWeb '        served_fonts::add_fonts(&fonts);' 'served_fonts::add_classes(&text);' '        served_fonts::add_classes(&text);'
+Replace-Exact 'upstream/photocraft/crates/ui-egui/src/text/font_filters.rs' '    let generation = photocraft_text::fonts::shared_generation();' '    let generation = photocraft_text::fonts::shared_generation().wrapping_add(photocraft_text::served::generation() << 32);'
+Replace-Exact 'upstream/photocraft/crates/ui-egui/src/text/font_filters.rs' '.fonts.family_traits(family);' '.fonts.family_traits(family).or_else(|| super::served_fonts::served_traits(family));'
 Write-Output 'VRAVIO branding applied to UI sources.'
