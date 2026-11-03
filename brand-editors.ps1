@@ -764,8 +764,11 @@ struct State {
     files: HashMap<String, Vec<String>>,
     /// Families asked for, not yet taken by [`take_requests`].
     requested: Vec<String>,
-    /// Families already asked for (and not reported as failed).
+    /// Families already asked for.
     asked: HashSet<String>,
+    /// Families whose files couldn't be fetched: not asked for again this session (a font menu
+    /// draws its rows every frame, and would ask again each time).
+    failed: HashSet<String>,
 }
 
 static STATE: LazyLock<Mutex<State>> = LazyLock::new(|| Mutex::new(State::default()));
@@ -839,9 +842,19 @@ pub fn take_requests() -> Vec<(String, Vec<String>)> {
         .collect()
 }
 
-/// A family's files couldn't be fetched: it may be asked for again.
+/// A family's files couldn't be fetched: text set in it keeps the fallback font.
 pub fn failed(family: &str) {
-    state().asked.remove(family);
+    state().failed.insert(family.to_string());
+}
+
+/// Is `family` a catalog family on its way (listed, not loaded, not failed)? Text set in it draws
+/// with the fallback font meanwhile, so a font menu doesn't keep a sample of it yet.
+pub fn pending(family: &str) -> bool {
+    let listed = {
+        let s = state();
+        s.families.iter().find(|f| f.eq_ignore_ascii_case(family)).is_some_and(|f| !s.failed.contains(f))
+    };
+    listed && !crate::FontDb::global().is_loaded(family)
 }
 
 #[cfg(test)]
@@ -874,9 +887,12 @@ mod tests {
         assert_eq!(got, vec![("Cloud Test D".to_string(), vec!["gfonts/c/ofl/d/D.ttf".to_string(), "gfonts/c/ofl/d/D-Bold.ttf".to_string()])]);
         request("Cloud Test D");
         assert!(take_requests().iter().all(|(f, _)| f != "Cloud Test D"), "asked once");
+        assert!(pending("Cloud Test D"), "on its way");
         failed("Cloud Test D");
         request("Cloud Test D");
-        assert!(take_requests().iter().any(|(f, _)| f == "Cloud Test D"), "asked again after a failed fetch");
+        assert!(take_requests().iter().all(|(f, _)| f != "Cloud Test D"), "not asked again after a failed fetch");
+        assert!(!pending("Cloud Test D"), "a failed family isn't waited for");
+        assert!(!pending("Not In The Catalog"));
     }
 
     #[test]
@@ -949,4 +965,12 @@ if (-not $fontsSrc.Contains('pub fn spawn_cloud_catalog')) { [IO.File]::WriteAll
 Insert-After-Once $vectorWeb '                crate::fonts::spawn_background_fonts(ctx.clone());' 'spawn_cloud_catalog' '                crate::fonts::spawn_cloud_catalog(ctx.clone());'
 Insert-After-Once $vectorWeb '    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {' 'serve_cloud_fonts' '        crate::fonts::serve_cloud_fonts(ctx);'
 
+Insert-After-Once 'upstream/vectorcraft/crates/ui-egui/src/font_menu.rs' '    let key: Key = (family.to_string(), style.unwrap_or("Regular").to_string(), sample.unwrap_or_default().to_string(), px);' 'cloud::pending(family)' @'
+    // VRAVIO: a cloud family still downloading has no sample yet (the lookup below asks for it); a
+    // sample set in the fallback font would be kept once it arrives.
+    if vectorcraft_text::cloud::pending(family) {
+        let _ = vectorcraft_text::FontDb::global().face(family, style.unwrap_or("Regular"));
+        return None;
+    }
+'@
 Write-Output 'VRAVIO branding applied to UI sources.'
