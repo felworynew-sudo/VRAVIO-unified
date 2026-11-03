@@ -1444,8 +1444,15 @@ $previewFetch = @'
                 }
             });
         }
-        if served_fonts::install_previews() {
-            ctx.request_repaint();
+        // Draw a few more frames once previews or fonts arrive: the canvas preview of a hovered
+        // family shows them a frame or two after the menu does.
+        static MORE_FRAMES: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+        if served_fonts::install_previews() || !arrived.is_empty() {
+            MORE_FRAMES.store(8, std::sync::atomic::Ordering::Relaxed);
+        }
+        if MORE_FRAMES.load(std::sync::atomic::Ordering::Relaxed) > 0 {
+            MORE_FRAMES.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+            ctx.request_repaint_after(std::time::Duration::from_millis(80));
         }
 '@
 Insert-Before-Once $rasterWeb '        let installed = !arrived.is_empty();' 'served_fonts::take_preview_requests()' $previewFetch.TrimEnd("`r", "`n")
