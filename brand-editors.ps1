@@ -113,7 +113,7 @@ Insert-Before-Once 'upstream/photocraft/crates/ui-egui/src/canvas.rs' '         
 $restoreItem = @'
     items.push(MenuItem {
         id: "filter.vravio.photoRestore".into(),
-        label: "Реставрация старых фото…".into(),
+        label: "Restore Old Photos…".into(),
         path: vec!["Filter".into()],
         shortcut: None,
         enabled: app.session.active().is_some() && app.services.export.is_some() && app.services.write.is_some(),
@@ -280,9 +280,9 @@ fn apply_ai_cutout(app: &mut PhotocraftApp, bytes: &[u8]) -> Result<(), String> 
 }
 '@
 Insert-Before-Once 'upstream/photocraft/apps/photocraft-web/src/web.rs' 'fn send_restore_input' 'fn apply_ai_cutout(app:' $applyAiMask
-Insert-Before-Once 'upstream/photocraft/apps/photocraft-web/src/web.rs' '        self.serve_fonts(ctx);' 'std::mem::take(&mut *self.cutout_inbox' "        let masks = std::mem::take(&mut *self.cutout_inbox.lock().unwrap_or_else(PoisonError::into_inner));`n        for bytes in masks {`n            if let Err(error) = apply_ai_cutout(&mut self.app, &bytes) { self.app.ui.status = format!(`"AI cutout failed: {error}`"); }`n        }`n        let restorations = std::mem::take(&mut *self.restore_inbox.lock().unwrap_or_else(PoisonError::into_inner));`n        for (name, original, restored) in restorations {`n            let result = self.app.open_bytes(&name, &original).and_then(|_| self.app.place_bytes(`"Восстановлено.png`", restored, None).map(|_| Vec::new()));`n            if let Err(error) = result { self.app.ui.status = format!(`"Restoration failed: {error}`"); }`n        }"
+Insert-Before-Once 'upstream/photocraft/apps/photocraft-web/src/web.rs' '        self.serve_fonts(ctx);' 'std::mem::take(&mut *self.cutout_inbox' "        let masks = std::mem::take(&mut *self.cutout_inbox.lock().unwrap_or_else(PoisonError::into_inner));`n        for bytes in masks {`n            if let Err(error) = apply_ai_cutout(&mut self.app, &bytes) { self.app.ui.status = format!(`"AI cutout failed: {error}`"); }`n        }`n        let restorations = std::mem::take(&mut *self.restore_inbox.lock().unwrap_or_else(PoisonError::into_inner));`n        for (name, original, restored) in restorations {`n            let result = self.app.open_bytes(&name, &original).and_then(|_| self.app.place_bytes(&format!(`"{}.png`", photocraft_ui_egui::i18n::t(if name.ends_with(`"x4.png`") { `"Upscaled ×4`" } else { `"Restored`" })), restored, None).map(|_| Vec::new()));`n            if let Err(error) = result { self.app.ui.status = format!(`"Restoration failed: {error}`"); }`n        }"
 Replace-Exact 'upstream/photocraft/apps/photocraft-web/Cargo.toml' "photocraft-doc = { workspace = true }`nphotocraft-ui-egui" "photocraft-doc = { workspace = true }`nphotocraft-geom = { workspace = true }`nphotocraft-ui-egui"
-Replace-Exact 'upstream/photocraft/apps/photocraft-web/src/web.rs' 'self.app.open_bytes(&name, &original).and_then(|_| self.app.place_bytes("Восстановлено.png", restored, None).map(|_| Vec::new()))' 'self.app.open_bytes(&name, &original).map(|_| ()).and_then(|_| self.app.place_bytes("Восстановлено.png", restored, None).map(|_| ()))'
+Replace-Exact 'upstream/photocraft/apps/photocraft-web/src/web.rs' 'self.app.open_bytes(&name, &original).and_then(|_| self.app.place_bytes("Восстановлено.png", restored, None).map(|_| Vec::new()))' 'self.app.open_bytes(&name, &original).map(|_| ()).and_then(|_| self.app.place_bytes(&format!("{}.png", photocraft_ui_egui::i18n::t(if name.ends_with("x4.png") { "Upscaled ×4" } else { "Restored" })), restored, None).map(|_| ()))'
 Replace-Exact 'upstream/photocraft/apps/photocraft-web/src/web.rs' 'fn send_restore_input(bytes: &[u8])' 'fn send_restore_input(path: &str, bytes: &[u8])'
 Replace-Exact 'upstream/photocraft/apps/photocraft-web/src/web.rs' 'js_sys::Reflect::set(&message, &"type".into(), &"vravio-restorer-open".into()).map_err(js)?;' "    let kind = if path.ends_with(`"vravio-cutout-input.png`") { `"vravio-cutout-open`" } else { `"vravio-restorer-open`" };`n    js_sys::Reflect::set(&message, &`"type`".into(), &kind.into()).map_err(js)?;"
 Replace-Exact 'upstream/photocraft/apps/photocraft-web/src/web.rs' 'move |event| {' 'move |event: web_sys::MessageEvent| {'
@@ -295,7 +295,7 @@ Insert-After-Once 'upstream/photocraft/apps/photocraft-web/src/web.rs' 'fn downl
 $aiToolsItem = @'
     items.push(MenuItem {
         id: "filter.vravio.aiTools".into(),
-        label: "Глубина и увеличение (ИИ)…".into(),
+        label: "Depth Map and Upscale (AI)…".into(),
         path: vec!["Filter".into()],
         shortcut: None,
         enabled: app.session.active().is_some() && app.services.export.is_some() && app.services.write.is_some(),
@@ -332,6 +332,30 @@ fn send_ai_input(bytes: &[u8]) -> Result<(), String> {
 '@
 Insert-Before-Once 'upstream/photocraft/apps/photocraft-web/src/web.rs' 'fn send_restore_input(' 'fn send_ai_input(' $aiToolsBridge
 Insert-After-Once 'upstream/photocraft/apps/photocraft-web/src/web.rs' 'fn download(path: &str, bytes: &[u8]) -> Result<(), String> {' 'vravio-ai-input.png' '    if path.ends_with("vravio-ai-input.png") { return send_ai_input(bytes); }'
+# VRAVIO raster strings are English in code; Russian and Ukrainian come from the editor's catalogs
+# (other languages show the English text, like any untranslated string).
+foreach ($catalog in @(
+  @('ru', @(
+    @('Restore Old Photos…', 'Реставрация старых фото…'),
+    @('Depth Map and Upscale (AI)…', 'Карта глубины и увеличение (ИИ)…'),
+    @('Restored', 'Восстановлено'),
+    @('Upscaled ×4', 'Увеличено ×4'),
+    @('File name and format (.psd, .ora, .png, .jpg, .tif):', 'Имя и формат файла (.psd, .ora, .png, .jpg, .tif):'),
+    @('Save the document before closing it', 'Сначала сохраните документ перед закрытием'))),
+  @('uk', @(
+    @('Restore Old Photos…', 'Реставрація старих фото…'),
+    @('Depth Map and Upscale (AI)…', 'Карта глибини та збільшення (ШІ)…'),
+    @('Restored', 'Відновлено'),
+    @('Upscaled ×4', 'Збільшено ×4'),
+    @('File name and format (.psd, .ora, .png, .jpg, .tif):', "Ім'я та формат файлу (.psd, .ora, .png, .jpg, .tif):"),
+    @('Save the document before closing it', 'Спершу збережіть документ перед закриттям')))
+)) {
+  $file = Join-Path $root "upstream/photocraft/crates/ui-egui/src/i18n/$($catalog[0]).tsv"
+  $text = [IO.File]::ReadAllText($file)
+  $add = ''
+  foreach ($pair in $catalog[1]) { if (-not $text.Contains("`t$($pair[0])`t")) { $add += "`t$($pair[0])`t$($pair[1])`n" } }
+  if ($add -ne '') { [IO.File]::WriteAllText($file, $text.TrimEnd("`r", "`n") + "`n" + $add, [Text.UTF8Encoding]::new($false)) }
+}
 Insert-After-Once 'upstream/photocraft/apps/photocraft-web/src/web.rs' 'fn download(path: &str, bytes: &[u8]) -> Result<(), String> {' 'return send_bridge_result(path, bytes);' '    if path.starts_with("vravio-bridge-result-") && path.ends_with(".png") { return send_bridge_result(path, bytes); }'
 Replace-Exact 'upstream/filmcraft/crates/ui-egui/src/theme.rs' 'accent: Color32::from_rgb(0x2f, 0x6b, 0xdf)' 'accent: Color32::from_rgb(0xff, 0x00, 0x00)'
 Replace-Exact 'upstream/filmcraft/crates/ui-egui/src/theme.rs' 'accent_hover: Color32::from_rgb(0x3f, 0x7c, 0xe8)' 'accent_hover: Color32::from_rgb(0xff, 0x44, 0x44)'
@@ -349,7 +373,7 @@ $vravioSaveDialog = @'
             FileDialogRequest::Save { suggested } => {
                 let name = std::path::Path::new(&suggested).file_name().map_or_else(|| suggested.clone(), |n| n.to_string_lossy().to_string());
                 let answer = web_sys::window().and_then(|window| window
-                    .prompt_with_message_and_default("Имя и формат файла (.psd, .ora, .png, .jpg, .tif):", &name)
+                    .prompt_with_message_and_default(photocraft_ui_egui::i18n::t("File name and format (.psd, .ora, .png, .jpg, .tif):"), &name)
                     .ok()
                     .flatten());
                 reply.send(answer.map(FileDialogAnswer::SaveTo));
@@ -543,7 +567,7 @@ $tabActionMethod = @'
         if kind == "vravio-documents:activate" { self.app.session.set_active(index); return; }
         if kind == "vravio-documents:close" && self.app.session.documents().get(index).is_some() {
             if self.app.session.documents()[index].is_dirty() {
-                self.app.ui.status = "Сначала сохраните документ перед закрытием".into();
+                self.app.ui.status = photocraft_ui_egui::i18n::t("Save the document before closing it").into();
                 self.app.session.set_active(index);
             } else {
                 self.app.session.set_active(index);
