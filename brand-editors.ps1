@@ -356,6 +356,159 @@ foreach ($catalog in @(
   foreach ($pair in $catalog[1]) { if (-not $text.Contains("`t$($pair[0])`t")) { $add += "`t$($pair[0])`t$($pair[1])`n" } }
   if ($add -ne '') { [IO.File]::WriteAllText($file, $text.TrimEnd("`r", "`n") + "`n" + $add, [Text.UTF8Encoding]::new($false)) }
 }
+# Raster on the web: the system clipboard. Copy also puts the pixels on the browser clipboard as PNG;
+# Ctrl+V takes an image from the paste event (held until it is decoded), and a paste that finds no
+# image asks the browser for the clipboard. So pixels move between browser tabs and from other apps.
+$clipboardPage = @'
+  <script>
+    // VRAVIO: the browser clipboard for the raster editor (images between tabs and from other apps).
+    (() => {
+      const state = { image: null, decoding: false, reading: false, held: null, pending: null, inPlace: false, keyAt: 0, pasteAt: 0, own: false, mirrored: false };
+      const decode = async blob => {
+        const bitmap = await createImageBitmap(blob, { premultiplyAlpha: 'none', colorSpaceConversion: 'none' });
+        const canvas = document.createElement('canvas');
+        canvas.width = bitmap.width; canvas.height = bitmap.height;
+        const context = canvas.getContext('2d', { willReadFrequently: true });
+        context.drawImage(bitmap, 0, 0); bitmap.close?.();
+        const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+        return { width: canvas.width, height: canvas.height, data: new Uint8Array(pixels.buffer, pixels.byteOffset, pixels.byteLength) };
+      };
+      const readSystem = async () => {
+        if (!navigator.clipboard?.read) return undefined;
+        for (const item of await navigator.clipboard.read()) {
+          const type = item.types.find(t => t.startsWith('image/'));
+          if (type) return decode(await item.getType(type));
+        }
+        return null;
+      };
+      const command = () => state.inPlace && performance.now() - state.keyAt < 2000 ? 'edit.pasteSpecial.pasteInPlace' : 'edit.paste';
+      addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.code === 'KeyV') { state.inPlace = e.shiftKey; state.keyAt = performance.now(); } }, true);
+      addEventListener('paste', e => {
+        state.pasteAt = performance.now();
+        const items = [...(e.clipboardData?.items || [])];
+        const file = items.find(i => i.kind === 'file' && i.type.startsWith('image/'))?.getAsFile();
+        if (!file) {
+          // Ctrl+Shift+V pastes as plain text in browsers and never carries the image; otherwise
+          // a paste without an image means the clipboard holds none now. Our own copy that the
+          // browser refused to put on the clipboard stays: it is still the last thing copied here.
+          if (!state.inPlace && items.length && !(state.own && !state.mirrored)) { state.image = null; state.own = false; }
+          return;
+        }
+        state.decoding = true; state.held = command();
+        decode(file).then(image => { state.image = image; state.own = false; }).catch(() => { state.held = null; }).finally(() => { state.decoding = false; });
+      }, true);
+      // With clipboard access already granted, keep the cached image current when the tab is entered.
+      addEventListener('focus', () => {
+        navigator.permissions?.query({ name: 'clipboard-read' }).then(p => {
+          if (p.state === 'granted') readSystem().then(image => { if (image !== undefined && !(state.own && !state.mirrored)) { state.image = image; state.own = false; } }).catch(() => {});
+        }).catch(() => {});
+      });
+      window.__vravioClipboard = {
+        // The image a paste should use. With none cached (a menu paste, or Ctrl+Shift+V), ask the
+        // browser once; the paste then runs again when the image arrives.
+        peek() {
+          const keyboardPaste = performance.now() - state.pasteAt < 1000 && !state.inPlace;
+          if (!state.image && !state.decoding && !state.reading && !keyboardPaste) {
+            state.reading = true; state.held = null;
+            const id = command();
+            readSystem().then(image => { if (image) { state.image = image; state.own = false; state.pending = id; } }).catch(() => {}).finally(() => { state.reading = false; });
+          }
+          return state.image;
+        },
+        write(width, height, data) {
+          state.image = { width, height, data }; state.own = true; state.mirrored = false;
+          if (!navigator.clipboard?.write || !window.ClipboardItem) return;
+          const png = new Promise((resolve, reject) => {
+            const canvas = document.createElement('canvas');
+            canvas.width = width; canvas.height = height;
+            canvas.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(data.buffer, data.byteOffset, data.byteLength), width, height), 0, 0);
+            canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('PNG')), 'image/png');
+          });
+          navigator.clipboard.write([new ClipboardItem({ 'image/png': png })]).then(() => { if (state.image?.data === data) state.mirrored = true; }).catch(() => {});
+        },
+        busy() { return state.decoding || state.reading; },
+        // The paste keys were held back while decoding: run that paste when the image is ready.
+        defer() { if (state.held) { state.pending = state.held; state.held = null; } },
+        takePending() {
+          if (state.decoding || state.reading || !state.pending) return null;
+          const id = state.pending; state.pending = null; return id;
+        },
+      };
+    })();
+  </script>
+'@
+Insert-Before-Once 'upstream/photocraft/apps/photocraft-web/index.html' '</head>' '__vravioClipboard' $clipboardPage.TrimEnd("`r", "`n")
+$clipboardBridge = @'
+/// VRAVIO: the page's clipboard helper (`window.__vravioClipboard`, in index.html).
+fn web_clipboard_call(name: &str, args: &[wasm_bindgen::JsValue]) -> Option<wasm_bindgen::JsValue> {
+    let window = web_sys::window()?;
+    let clip = js_sys::Reflect::get(window.as_ref(), &"__vravioClipboard".into()).ok().filter(|v| v.is_object())?;
+    let function = js_sys::Reflect::get(&clip, &name.into()).ok()?.dyn_into::<js_sys::Function>().ok()?;
+    let list = js_sys::Array::new();
+    for arg in args {
+        list.push(arg);
+    }
+    function.apply(&clip, &list).ok()
+}
+
+/// Keeps frames coming while the helper decodes or reads an image, so a held paste runs.
+static WEB_CLIPBOARD_CTX: std::sync::OnceLock<egui::Context> = std::sync::OnceLock::new();
+
+fn web_clipboard_poll() {
+    if web_clipboard_call("busy", &[]).and_then(|v| v.as_bool()).unwrap_or(false) {
+        if let Some(ctx) = WEB_CLIPBOARD_CTX.get() {
+            ctx.request_repaint_after(std::time::Duration::from_millis(30));
+        }
+    }
+}
+
+fn web_clipboard_peek() -> Result<Option<(u32, u32, Vec<u8>)>, String> {
+    let image = web_clipboard_call("peek", &[]).filter(|v| v.is_object());
+    web_clipboard_poll();
+    let Some(image) = image else { return Ok(None) };
+    let size = |key: &str| js_sys::Reflect::get(&image, &key.into()).ok().and_then(|v| v.as_f64()).unwrap_or(0.0) as u32;
+    let (width, height) = (size("width"), size("height"));
+    let data = js_sys::Reflect::get(&image, &"data".into()).map_err(|e| format!("{e:?}"))?;
+    let bytes = js_sys::Uint8Array::new(&data).to_vec();
+    Ok((width > 0 && height > 0 && bytes.len() == width as usize * height as usize * 4).then_some((width, height, bytes)))
+}
+
+fn web_clipboard_write(width: u32, height: u32, pixels: &[u8]) {
+    let args = [wasm_bindgen::JsValue::from_f64(width as f64), wasm_bindgen::JsValue::from_f64(height as f64), js_sys::Uint8Array::from(pixels).into()];
+    let _ = web_clipboard_call("write", &args);
+}
+'@
+Insert-Before-Once 'upstream/photocraft/apps/photocraft-web/src/web.rs' 'fn send_ai_input(' 'fn web_clipboard_call(' $clipboardBridge
+$clipboardHold = @'
+        // VRAVIO: an image from the paste event is still being decoded: hold the paste keys, the
+        // paste runs in `logic` once the image is ready.
+        if web_clipboard_call("busy", &[]).and_then(|v| v.as_bool()).unwrap_or(false) {
+            let before = raw_input.events.len();
+            raw_input.events.retain(|e| {
+                !matches!(e, egui::Event::Key { key: egui::Key::V, pressed: true, modifiers, .. } if modifiers.command)
+                    && !matches!(e, egui::Event::Paste(_) | egui::Event::PasteImage(_))
+            });
+            if raw_input.events.len() != before {
+                web_clipboard_call("defer", &[]);
+            }
+            ctx.request_repaint_after(std::time::Duration::from_millis(30));
+        }
+'@
+Insert-Before-Once 'upstream/photocraft/apps/photocraft-web/src/web.rs' '        eframe::App::raw_input_hook(&mut self.app, ctx, raw_input);' 'web_clipboard_call("defer"' $clipboardHold.TrimEnd("`r", "`n")
+$clipboardRun = @'
+        // VRAVIO: a paste held for a clipboard image, or one that had to ask the browser for it.
+        let _ = WEB_CLIPBOARD_CTX.get_or_init(|| ctx.clone());
+        if let Some(id) = web_clipboard_call("takePending", &[]).and_then(|v| v.as_string()) {
+            self.app.ui.status.clear();
+            self.app.ui.status_error = false;
+            if let Err(error) = self.app.run(&id, serde_json::json!({})) {
+                self.app.ui.status = error;
+            }
+            ctx.request_repaint();
+        }
+        web_clipboard_poll();
+'@
+Insert-After-Once 'upstream/photocraft/apps/photocraft-web/src/web.rs' '    fn logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {' 'web_clipboard_call("takePending"' $clipboardRun.TrimEnd("`r", "`n")
 Insert-After-Once 'upstream/photocraft/apps/photocraft-web/src/web.rs' 'fn download(path: &str, bytes: &[u8]) -> Result<(), String> {' 'return send_bridge_result(path, bytes);' '    if path.starts_with("vravio-bridge-result-") && path.ends_with(".png") { return send_bridge_result(path, bytes); }'
 Replace-Exact 'upstream/filmcraft/crates/ui-egui/src/theme.rs' 'accent: Color32::from_rgb(0x2f, 0x6b, 0xdf)' 'accent: Color32::from_rgb(0xff, 0x00, 0x00)'
 Replace-Exact 'upstream/filmcraft/crates/ui-egui/src/theme.rs' 'accent_hover: Color32::from_rgb(0x3f, 0x7c, 0xe8)' 'accent_hover: Color32::from_rgb(0xff, 0x44, 0x44)'
@@ -731,7 +884,7 @@ fn send_clipboard_image(width: u32, height: u32, pixels: &[u8]) -> Result<(), St
 }
 '@
 Insert-Before-Once $rasterWeb 'fn send_bridge_result(path: &str, bytes: &[u8])' 'fn send_clipboard_image(' $clipboardSender
-Insert-Before-Once $rasterWeb '        import: Some(Box::new(|name: &str, bytes: &[u8], opts: &photocraft_io::ImportOptions|' 'clipboard_set_image: Some(Box::new(|width, height, pixels|' '        clipboard_set_image: Some(Box::new(|width, height, pixels| send_clipboard_image(width, height, pixels))),'
+Insert-Before-Once $rasterWeb '        import: Some(Box::new(|name: &str, bytes: &[u8], opts: &photocraft_io::ImportOptions|' 'clipboard_set_image: Some(Box::new(|width, height, pixels|' "        clipboard_set_image: Some(Box::new(|width, height, pixels| { web_clipboard_write(width, height, pixels); send_clipboard_image(width, height, pixels) })),`n        clipboard_get_image: Some(Box::new(web_clipboard_peek)),"
 Insert-Before-Once $rasterWeb '                    notify_bridge_ready();' 'let snapshot_requested = Arc::new(AtomicBool::new(false));' '                    let snapshot_requested = Arc::new(AtomicBool::new(false));'
 Replace-Exact $rasterWeb 'listen_restore_result(inbox.clone(), cutout_inbox.clone(), restore_inbox.clone(), place_inbox.clone(), cc.egui_ctx.clone());' 'listen_restore_result(inbox.clone(), cutout_inbox.clone(), restore_inbox.clone(), place_inbox.clone(), snapshot_requested.clone(), tab_action.clone(), cc.egui_ctx.clone());'
 Insert-After-Once $rasterWeb '    restore_inbox: RestoreInbox,' '    snapshot_revisions: HashMap<u64, u64>,' "    snapshot_requested: Arc<AtomicBool>,`n    snapshot_revisions: HashMap<u64, u64>,"
