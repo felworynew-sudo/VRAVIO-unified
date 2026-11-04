@@ -2,3 +2,5 @@ YuNet face detector — OpenCV Zoo (face_detection_yunet_2023mar.onnx), MIT Lice
 RestoreFormer++ — Wang et al., Apache-2.0, https://github.com/wzhouxiaohang/RestoreFormerPlusPlus (ONNX: huggingface.co/facefusion/models-3.0.0)
 Real-ESRGAN x4 — xinntao, BSD-3-Clause, https://github.com/xinntao/Real-ESRGAN (ONNX: huggingface.co/facefusion/models-3.0.0)
 Vetor Restore — own networks (restore-lab), weights published via vetor-restore.json when ready.
+Real-ESRGAN general-x4v3 (realesr-general-x4v3.onnx) — xinntao, BSD-3-Clause, https://github.com/xinntao/Real-ESRGAN
+Depth Anything V2 Small — Yang et al., Apache-2.0, https://github.com/DepthAnything/Depth-Anything-V2 (ONNX q4f16: huggingface.co/onnx-community/depth-anything-v2-small, loaded at first use)

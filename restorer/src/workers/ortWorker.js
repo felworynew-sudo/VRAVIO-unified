@@ -2,6 +2,7 @@
 // Протокол: { id, type: 'load', key, url, device } → { id, ok, device, inputName, outputNames } (+ { id, progress: [got, total] } по ходу загрузки)
 //           { id, type: 'run', key, data, dims, names } → { id, outputs: { имя: { data, dims } } }
 //           { id, type: 'release', key }
+// opt — уровень оптимизации графа ('all' по умолчанию; fp16/q4-модели Depth Anything падают на слиянии LayerNorm и требуют 'basic').
 // device 'webgpu' при неудаче сам откатывается на 'wasm' (если модель такое переживёт).
 
 import ortWasmUrl from 'onnxruntime-web/ort-wasm-simd-threaded.jsep.wasm?url';
@@ -103,7 +104,7 @@ async function fetchModel(url, onProgress) {
   return out;
 }
 
-async function load({ id, key, url, device }) {
+async function load({ id, key, url, device, opt = 'all' }) {
   const old = sessions.get(key);
   if (old && old.device === device && JSON.stringify(old.url) === JSON.stringify(url)) return { ok: true, device: old.device, inputName: old.inputName, outputNames: old.outputNames };
   if (old) { try { await old.sess.release(); } catch { /* */ } sessions.delete(key); }
@@ -111,11 +112,11 @@ async function load({ id, key, url, device }) {
   const bytes = await fetchModel(url, (got, total) => self.postMessage({ id, progress: [got, total] }));
   let used = device; let sess;
   try {
-    sess = await ort.InferenceSession.create(bytes, { executionProviders: [device], graphOptimizationLevel: 'all' });
+    sess = await ort.InferenceSession.create(bytes, { executionProviders: [device], graphOptimizationLevel: opt });
   } catch (e) {
     if (device !== 'webgpu') throw e;
     used = 'wasm';
-    sess = await ort.InferenceSession.create(bytes, { executionProviders: ['wasm'], graphOptimizationLevel: 'all' });
+    sess = await ort.InferenceSession.create(bytes, { executionProviders: ['wasm'], graphOptimizationLevel: opt });
   }
   const rec = { ort, sess, device: used, url, inputName: sess.inputNames[0], outputNames: [...sess.outputNames] };
   sessions.set(key, rec);

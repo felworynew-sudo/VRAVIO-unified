@@ -535,7 +535,15 @@ function render() {
 const frames = new Map();
 function showChooser() { chooserOpen = true; render(); }
 function hideChooser() { chooserOpen = false; render(); }
+let aiGuard = false;
+// Окно ИИ само решает, можно ли закрыться сразу: при идущем счёте или невставленном результате оно сначала предупреждает.
+function requestCloseRestorer() {
+  const frame = document.querySelector('#restorer-root iframe.ai-frame');
+  if (frame && aiGuard) frame.contentWindow?.postMessage({ type: 'vravio-ai-close-request' }, location.origin);
+  else closeRestorer();
+}
 function closeRestorer() {
+  aiGuard = false;
   restoreGeneration++;
   restoreCleanup?.();
   restoreCleanup = null;
@@ -544,7 +552,7 @@ function closeRestorer() {
 }
 document.addEventListener('keydown', event => {
   if (event.key === 'Escape' && document.querySelector('#restorer-root .restore-scrim')) {
-    event.preventDefault(); closeRestorer(); return;
+    event.preventDefault(); requestCloseRestorer(); return;
   }
   if (event.key === 'Escape' && chooserOpen) { hideChooser(); return; }
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'n') { event.preventDefault(); showChooser(); }
@@ -626,20 +634,25 @@ window.addEventListener('message', event => {
     try { bridge.opener.postMessage({ type: 'vravio-bridge:saved', version: 1, token: bridge.token, bytes: message.bytes }, bridge.origin); } catch { /* opener was closed */ }
     return;
   }
-  if (message?.type === 'vravio-restorer-open' || message?.type === 'vravio-cutout-open') {
+  if (message?.type === 'vravio-restorer-open' || message?.type === 'vravio-cutout-open' || message?.type === 'vravio-ai-open') {
     const raster = tabs.find(t => t.kind === 'raster');
     if (!raster || frames.get(raster.id)?.contentWindow !== event.source) return;
     restorerSource = event.source;
     const root = document.querySelector('#restorer-root');
     const cutout = message.type === 'vravio-cutout-open';
+    const ai = message.type === 'vravio-ai-open';
     closeRestorer();
     restorerSource = event.source;
     const generation = restoreGeneration;
     const russian = rasterLocale.toLowerCase().startsWith('ru');
-    root.innerHTML = `<div class="restore-scrim"><button class="restore-dismiss" aria-label="${russian ? 'Закрыть окно' : 'Close dialog'}" title="${russian ? 'Закрыть' : 'Close'}">×</button>${cutout ? `<iframe title="${russian ? 'Удалить фон' : 'Remove background'}"></iframe>` : `<div id="restore-app" data-base="${local('restorer/')}"><div class="restore-loading">${russian ? 'Открываем реставрацию…' : 'Opening restoration…'}</div></div>`}</div>`;
-    root.querySelector('.restore-dismiss').onclick = closeRestorer;
-    root.querySelector('.restore-scrim').addEventListener('click', e => { if (e.target.classList.contains('restore-scrim')) closeRestorer(); });
-    if (cutout) {
+    root.innerHTML = `<div class="restore-scrim"><button class="restore-dismiss" aria-label="${russian ? 'Закрыть окно' : 'Close dialog'}" title="${russian ? 'Закрыть' : 'Close'}">×</button>${ai ? `<iframe class="ai-frame" title="${russian ? 'Глубина и увеличение' : 'Depth and upscale'}"></iframe>` : cutout ? `<iframe title="${russian ? 'Удалить фон' : 'Remove background'}"></iframe>` : `<div id="restore-app" data-base="${local('restorer/')}"><div class="restore-loading">${russian ? 'Открываем реставрацию…' : 'Opening restoration…'}</div></div>`}</div>`;
+    root.querySelector('.restore-dismiss').onclick = requestCloseRestorer;
+    root.querySelector('.restore-scrim').addEventListener('click', e => { if (e.target.classList.contains('restore-scrim')) requestCloseRestorer(); });
+    if (ai) {
+      const frame = root.querySelector('iframe');
+      frame.onload = () => frame.contentWindow.postMessage({ type: 'vravio-ai-input', bytes: message.bytes, name: 'photo.png', locale: rasterLocale }, location.origin);
+      frame.src = local('restorer/ai/');
+    } else if (cutout) {
       const frame = root.querySelector('iframe');
       frame.onload = () => frame.contentWindow.postMessage({ type: 'vravio-cutout-input', bytes: message.bytes, name: 'photo.png', locale: rasterLocale }, location.origin);
       frame.src = local('restorer/cutout/');
@@ -659,7 +672,11 @@ window.addEventListener('message', event => {
     }
     return;
   }
-  if (['vravio-restorer-close', 'vravio-restorer-result', 'vravio-cutout-close', 'vravio-cutout-result'].includes(message?.type)) {
+  if (message?.type === 'vravio-ai-state') {
+    if (document.querySelector('#restorer-root iframe.ai-frame')?.contentWindow === event.source) aiGuard = !!message.guard;
+    return;
+  }
+  if (['vravio-restorer-close', 'vravio-restorer-result', 'vravio-cutout-close', 'vravio-cutout-result', 'vravio-ai-close'].includes(message?.type)) {
     const frame = document.querySelector('#restorer-root iframe');
     if (frame?.contentWindow !== event.source) return;
     if (message.type === 'vravio-restorer-result' || message.type === 'vravio-cutout-result') restorerSource?.postMessage(message, location.origin);

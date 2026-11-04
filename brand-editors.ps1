@@ -291,6 +291,47 @@ Insert-Before-Once 'upstream/photocraft/apps/photocraft-web/src/web.rs' '       
 Insert-After-Once 'upstream/photocraft/apps/photocraft-web/src/web.rs' '                    let place_inbox: Inbox = Arc::default();' 'listen_restore_result(inbox.clone(),' '                    listen_restore_result(inbox.clone(), cutout_inbox.clone(), restore_inbox.clone(), place_inbox.clone(), snapshot_requested.clone(), tab_action.clone(), cc.egui_ctx.clone());'
 Insert-Before-Once 'upstream/photocraft/apps/photocraft-web/src/web.rs' '                    let place_inbox: Inbox = Arc::default();' 'notify_bridge_ready();' '                    notify_bridge_ready();'
 Insert-After-Once 'upstream/photocraft/apps/photocraft-web/src/web.rs' 'fn download(path: &str, bytes: &[u8]) -> Result<(), String> {' 'return send_restore_input(path, bytes);' '    if path.ends_with("vravio-restoration-input.png") || path.ends_with("vravio-cutout-input.png") { return send_restore_input(path, bytes); }'
+# AI depth map and x4 upscale (restorer/ai): own menu item, own bridge message; restore/cutout lines stay untouched.
+$aiToolsItem = @'
+    items.push(MenuItem {
+        id: "filter.vravio.aiTools".into(),
+        label: "Глубина и увеличение (ИИ)…".into(),
+        path: vec!["Filter".into()],
+        shortcut: None,
+        enabled: app.session.active().is_some() && app.services.export.is_some() && app.services.write.is_some(),
+        checked: None,
+        color: None,
+    });
+'@
+Insert-Before-Once 'upstream/photocraft/crates/ui-egui/src/menus/items.rs' '    crate::plugin_ui::insert_menu_items(app, &mut items);' 'filter.vravio.aiTools' $aiToolsItem
+$aiToolsCommand = @'
+    if id == "filter.vravio.aiTools" {
+        let doc = app.session.active().ok_or("no document is open".to_string());
+        return Some(doc.and_then(|doc| {
+            let export = app.services.export.as_ref().ok_or("PNG export is unavailable")?;
+            let (bytes, _) = export(&doc.doc, "vravio-ai-input.png", &crate::ExportSettings::default())?;
+            let write = app.services.write.as_mut().ok_or("browser bridge is unavailable")?;
+            write("vravio-ai-input.png", &bytes)?;
+            Ok(json!({"sent": true}))
+        }));
+    }
+'@
+Insert-Before-Once 'upstream/photocraft/crates/ui-egui/src/menus/invoke.rs' '    if id == "filter.vravio.photoRestore"' 'if id == "filter.vravio.aiTools" {' $aiToolsCommand
+$aiToolsBridge = @'
+fn send_ai_input(bytes: &[u8]) -> Result<(), String> {
+    let js = |e: wasm_bindgen::JsValue| format!("{e:?}");
+    let window = web_sys::window().ok_or("no window")?;
+    let parent = js_sys::Reflect::get(window.as_ref(), &"parent".into()).map_err(js)?;
+    let post = js_sys::Reflect::get(&parent, &"postMessage".into()).map_err(js)?.dyn_into::<js_sys::Function>().map_err(|_| "no postMessage")?;
+    let message = js_sys::Object::new();
+    js_sys::Reflect::set(&message, &"type".into(), &"vravio-ai-open".into()).map_err(js)?;
+    js_sys::Reflect::set(&message, &"bytes".into(), &js_sys::Uint8Array::from(bytes).into()).map_err(js)?;
+    post.call2(&parent, &message, &window.location().origin().map_err(js)?.into()).map_err(js)?;
+    Ok(())
+}
+'@
+Insert-Before-Once 'upstream/photocraft/apps/photocraft-web/src/web.rs' 'fn send_restore_input(' 'fn send_ai_input(' $aiToolsBridge
+Insert-After-Once 'upstream/photocraft/apps/photocraft-web/src/web.rs' 'fn download(path: &str, bytes: &[u8]) -> Result<(), String> {' 'vravio-ai-input.png' '    if path.ends_with("vravio-ai-input.png") { return send_ai_input(bytes); }'
 Insert-After-Once 'upstream/photocraft/apps/photocraft-web/src/web.rs' 'fn download(path: &str, bytes: &[u8]) -> Result<(), String> {' 'return send_bridge_result(path, bytes);' '    if path.starts_with("vravio-bridge-result-") && path.ends_with(".png") { return send_bridge_result(path, bytes); }'
 Replace-Exact 'upstream/filmcraft/crates/ui-egui/src/theme.rs' 'accent: Color32::from_rgb(0x2f, 0x6b, 0xdf)' 'accent: Color32::from_rgb(0xff, 0x00, 0x00)'
 Replace-Exact 'upstream/filmcraft/crates/ui-egui/src/theme.rs' 'accent_hover: Color32::from_rgb(0x3f, 0x7c, 0xe8)' 'accent_hover: Color32::from_rgb(0xff, 0x44, 0x44)'
