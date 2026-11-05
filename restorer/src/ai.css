@@ -20,3 +20,8 @@ html,body{height:100%}
   #ai-app header, #ai-app footer, #ai-app .controls{padding-left:12px;padding-right:12px}
   #ai-app footer button{flex:1 1 auto}
 }
+#ai-app .controls .strength input{width:140px}
+#ai-app .controls .strength output{min-width:42px;font-variant-numeric:tabular-nums}
+#ai-app .preview figure div{cursor:zoom-in}
+#ai-app .preview.actual figure div{display:block;overflow:auto;cursor:zoom-out}
+#ai-app .preview.actual img{max-width:none;max-height:none}

@@ -3,25 +3,29 @@
 //           { id, type: 'run', key, data, dims, names } → { id, outputs: { имя: { data, dims } } }
 //           { id, type: 'release', key }
 // opt — уровень оптимизации графа ('all' по умолчанию; fp16/q4-модели Depth Anything падают на слиянии LayerNorm и требуют 'basic').
+// external — веса модели отдельным файлом ({ path, url }: path — имя, под которым граф ссылается на них).
 // device 'webgpu' при неудаче сам откатывается на 'wasm' (если модель такое переживёт).
 
 import { getOrt, fetchModel } from '../utils/ortRuntime.js';
 
 const sessions = new Map();
 
-async function load({ id, key, url, device, opt = 'all' }) {
+async function load({ id, key, url, device, opt = 'all', external }) {
   const old = sessions.get(key);
   if (old && old.device === device && JSON.stringify(old.url) === JSON.stringify(url)) return { ok: true, device: old.device, inputName: old.inputName, outputNames: old.outputNames };
   if (old) { try { await old.sess.release(); } catch { /* */ } sessions.delete(key); }
   const ort = await getOrt();
-  const bytes = await fetchModel(url, (got, total) => self.postMessage({ id, progress: [got, total] }));
+  const parts = external ? [url, external.url] : [url]; const got = parts.map(() => 0); const sizes = parts.map(() => 0);
+  const report = i => (g, t) => { got[i] = g; sizes[i] = t; self.postMessage({ id, progress: [got.reduce((a, b) => a + b, 0), Math.max(1, sizes.reduce((a, b) => a + b, 0))] }); };
+  const bytes = await fetchModel(url, report(0));
+  const extra = external ? { externalData: [{ path: external.path, data: await fetchModel(external.url, report(1)) }] } : {};
   let used = device; let sess;
   try {
-    sess = await ort.InferenceSession.create(bytes, { executionProviders: [device], graphOptimizationLevel: opt });
+    sess = await ort.InferenceSession.create(bytes, { executionProviders: [device], graphOptimizationLevel: opt, ...extra });
   } catch (e) {
     if (device !== 'webgpu') throw e;
     used = 'wasm';
-    sess = await ort.InferenceSession.create(bytes, { executionProviders: ['wasm'], graphOptimizationLevel: opt });
+    sess = await ort.InferenceSession.create(bytes, { executionProviders: ['wasm'], graphOptimizationLevel: opt, ...extra });
   }
   const rec = { ort, sess, device: used, url, inputName: sess.inputNames[0], outputNames: [...sess.outputNames] };
   sessions.set(key, rec);

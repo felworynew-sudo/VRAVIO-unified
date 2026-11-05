@@ -28,10 +28,10 @@ function call(msg, transfer = [], onProgress) {
 const sessions = new Map();
 
 // Возвращает { device, inputName, outputNames, run(data, dims, names?) → { имя: { data, dims } } }. Повторная загрузка того же key/url/device — мгновенная.
-export function loadSession(key, url, device, onProgress, { opt } = {}) {
+export function loadSession(key, url, device, onProgress, { opt, external } = {}) {
   const id = `${key}:${device}:${opt || 'all'}:${Array.isArray(url) ? url.join('|') : url}`;
   if (sessions.has(id)) return sessions.get(id);
-  const p = call({ type: 'load', key, url, device, opt }, [], onProgress).then((m) => ({
+  const p = call({ type: 'load', key, url, device, opt, external }, [], onProgress).then((m) => ({
     device: m.device, inputName: m.inputName, outputNames: m.outputNames,
     // data передаётся воркеру без копии — после вызова исходный массив пуст
     async run(data, dims, names) { return (await call({ type: 'run', key, data, dims, names }, [data.buffer])).outputs; },

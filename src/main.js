@@ -670,12 +670,12 @@ window.addEventListener('message', event => {
     restorerSource = event.source;
     const generation = restoreGeneration;
     const russian = rasterLocale.toLowerCase().startsWith('ru');
-    root.innerHTML = `<div class="restore-scrim"><button class="restore-dismiss" aria-label="${russian ? 'Закрыть окно' : 'Close dialog'}" title="${russian ? 'Закрыть' : 'Close'}">×</button>${ai ? `<iframe class="ai-frame" title="${russian ? 'Глубина и увеличение' : 'Depth and upscale'}"></iframe>` : cutout ? `<iframe title="${russian ? 'Удалить фон' : 'Remove background'}"></iframe>` : `<div id="restore-app" data-base="${local('restorer/')}"><div class="restore-loading">${russian ? 'Открываем реставрацию…' : 'Opening restoration…'}</div></div>`}</div>`;
+    root.innerHTML = `<div class="restore-scrim"><button class="restore-dismiss" aria-label="${russian ? 'Закрыть окно' : 'Close dialog'}" title="${russian ? 'Закрыть' : 'Close'}">×</button>${ai ? `<iframe class="ai-frame" title="${russian ? 'ИИ-инструменты' : 'AI tools'}"></iframe>` : cutout ? `<iframe title="${russian ? 'Удалить фон' : 'Remove background'}"></iframe>` : `<div id="restore-app" data-base="${local('restorer/')}"><div class="restore-loading">${russian ? 'Открываем реставрацию…' : 'Opening restoration…'}</div></div>`}</div>`;
     root.querySelector('.restore-dismiss').onclick = requestCloseRestorer;
     root.querySelector('.restore-scrim').addEventListener('click', e => { if (e.target.classList.contains('restore-scrim')) requestCloseRestorer(); });
     if (ai) {
       const frame = root.querySelector('iframe');
-      frame.onload = () => frame.contentWindow.postMessage({ type: 'vravio-ai-input', bytes: message.bytes, name: 'photo.png', locale: rasterLocale }, location.origin);
+      frame.onload = () => frame.contentWindow.postMessage({ type: 'vravio-ai-input', bytes: message.bytes, name: 'photo.png', tool: message.tool, locale: rasterLocale }, location.origin);
       frame.src = local('restorer/ai/');
     } else if (cutout) {
       const frame = root.querySelector('iframe');

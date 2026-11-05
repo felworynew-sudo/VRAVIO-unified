@@ -329,6 +329,32 @@ $aiCutoutCommand = @'
     }
 '@
 Insert-Before-Once 'upstream/photocraft/crates/ui-egui/src/menus/invoke.rs' '    if id == "filter.vravio.photoRestore"' 'if id == "filter.vravio.removeBackground" {' $aiCutoutCommand
+# AI noise reduction (SCUNet): the same AI dialog, opened on its denoise tool.
+$aiDenoiseItem = @'
+    items.push(MenuItem {
+        id: "filter.vravio.aiDenoise".into(),
+        label: "Noise Reduction…".into(),
+        path: vec!["Filter".into(), "AI".into()],
+        shortcut: None,
+        enabled: app.session.active().is_some() && app.services.export.is_some() && app.services.write.is_some(),
+        checked: None,
+        color: None,
+    });
+'@
+Insert-Before-Once 'upstream/photocraft/crates/ui-egui/src/menus/items.rs' '    crate::plugin_ui::insert_menu_items(app, &mut items);' 'filter.vravio.aiDenoise' $aiDenoiseItem
+$aiDenoiseCommand = @'
+    if id == "filter.vravio.aiDenoise" {
+        let doc = app.session.active().ok_or("no document is open".to_string());
+        return Some(doc.and_then(|doc| {
+            let export = app.services.export.as_ref().ok_or("PNG export is unavailable")?;
+            let (bytes, _) = export(&doc.doc, "vravio-ai-denoise.png", &crate::ExportSettings::default())?;
+            let write = app.services.write.as_mut().ok_or("browser bridge is unavailable")?;
+            write("vravio-ai-denoise.png", &bytes)?;
+            Ok(json!({"sent": true}))
+        }));
+    }
+'@
+Insert-Before-Once 'upstream/photocraft/crates/ui-egui/src/menus/invoke.rs' '    if id == "filter.vravio.photoRestore"' 'if id == "filter.vravio.aiDenoise" {' $aiDenoiseCommand
 $aiToolsCommand = @'
     if id == "filter.vravio.aiTools" {
         let doc = app.session.active().ok_or("no document is open".to_string());
@@ -343,20 +369,22 @@ $aiToolsCommand = @'
 '@
 Insert-Before-Once 'upstream/photocraft/crates/ui-egui/src/menus/invoke.rs' '    if id == "filter.vravio.photoRestore"' 'if id == "filter.vravio.aiTools" {' $aiToolsCommand
 $aiToolsBridge = @'
-fn send_ai_input(bytes: &[u8]) -> Result<(), String> {
+fn send_ai_input(bytes: &[u8], tool: &str) -> Result<(), String> {
     let js = |e: wasm_bindgen::JsValue| format!("{e:?}");
     let window = web_sys::window().ok_or("no window")?;
     let parent = js_sys::Reflect::get(window.as_ref(), &"parent".into()).map_err(js)?;
     let post = js_sys::Reflect::get(&parent, &"postMessage".into()).map_err(js)?.dyn_into::<js_sys::Function>().map_err(|_| "no postMessage")?;
     let message = js_sys::Object::new();
     js_sys::Reflect::set(&message, &"type".into(), &"vravio-ai-open".into()).map_err(js)?;
+    js_sys::Reflect::set(&message, &"tool".into(), &tool.into()).map_err(js)?;
     js_sys::Reflect::set(&message, &"bytes".into(), &js_sys::Uint8Array::from(bytes).into()).map_err(js)?;
     post.call2(&parent, &message, &window.location().origin().map_err(js)?.into()).map_err(js)?;
     Ok(())
 }
 '@
 Insert-Before-Once 'upstream/photocraft/apps/photocraft-web/src/web.rs' 'fn send_restore_input(' 'fn send_ai_input(' $aiToolsBridge
-Insert-After-Once 'upstream/photocraft/apps/photocraft-web/src/web.rs' 'fn download(path: &str, bytes: &[u8]) -> Result<(), String> {' 'vravio-ai-input.png' '    if path.ends_with("vravio-ai-input.png") { return send_ai_input(bytes); }'
+Insert-After-Once 'upstream/photocraft/apps/photocraft-web/src/web.rs' 'fn download(path: &str, bytes: &[u8]) -> Result<(), String> {' 'vravio-ai-input.png' '    if path.ends_with("vravio-ai-input.png") { return send_ai_input(bytes, "depth"); }'
+Insert-After-Once 'upstream/photocraft/apps/photocraft-web/src/web.rs' 'fn download(path: &str, bytes: &[u8]) -> Result<(), String> {' 'vravio-ai-denoise.png' '    if path.ends_with("vravio-ai-denoise.png") { return send_ai_input(bytes, "denoise"); }'
 # VRAVIO raster strings are English in code; Russian and Ukrainian come from the editor's catalogs
 # (other languages show the English text, like any untranslated string).
 foreach ($catalog in @(
@@ -364,6 +392,7 @@ foreach ($catalog in @(
     @('Restore Old Photos…', 'Реставрация старых фото…'),
     @('AI', 'ИИ'),
     @('Remove Background…', 'Удалить фон…'),
+    @('Noise Reduction…', 'Шумоподавление…'),
     @('Depth Map and Upscale…', 'Карта глубины и увеличение…'),
     @('Restored', 'Восстановлено'),
     @('Upscaled ×4', 'Увеличено ×4'),
@@ -373,6 +402,7 @@ foreach ($catalog in @(
     @('Restore Old Photos…', 'Реставрація старих фото…'),
     @('AI', 'ШІ'),
     @('Remove Background…', 'Видалити фон…'),
+    @('Noise Reduction…', 'Зменшення шуму…'),
     @('Depth Map and Upscale…', 'Карта глибини та збільшення…'),
     @('Restored', 'Відновлено'),
     @('Upscaled ×4', 'Збільшено ×4'),
