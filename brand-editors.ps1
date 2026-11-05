@@ -114,7 +114,7 @@ $restoreItem = @'
     items.push(MenuItem {
         id: "filter.vravio.photoRestore".into(),
         label: "Restore Old Photos…".into(),
-        path: vec!["Filter".into()],
+        path: vec!["Filter".into(), "AI".into()],
         shortcut: None,
         enabled: app.session.active().is_some() && app.services.export.is_some() && app.services.write.is_some(),
         checked: None,
@@ -295,8 +295,8 @@ Insert-After-Once 'upstream/photocraft/apps/photocraft-web/src/web.rs' 'fn downl
 $aiToolsItem = @'
     items.push(MenuItem {
         id: "filter.vravio.aiTools".into(),
-        label: "Depth Map and Upscale (AI)…".into(),
-        path: vec!["Filter".into()],
+        label: "Depth Map and Upscale…".into(),
+        path: vec!["Filter".into(), "AI".into()],
         shortcut: None,
         enabled: app.session.active().is_some() && app.services.export.is_some() && app.services.write.is_some(),
         checked: None,
@@ -304,6 +304,31 @@ $aiToolsItem = @'
     });
 '@
 Insert-Before-Once 'upstream/photocraft/crates/ui-egui/src/menus/items.rs' '    crate::plugin_ui::insert_menu_items(app, &mut items);' 'filter.vravio.aiTools' $aiToolsItem
+$aiCutoutItem = @'
+    items.push(MenuItem {
+        id: "filter.vravio.removeBackground".into(),
+        label: "Remove Background…".into(),
+        path: vec!["Filter".into(), "AI".into()],
+        shortcut: None,
+        enabled: app.session.active().is_some() && app.services.export.is_some() && app.services.write.is_some(),
+        checked: None,
+        color: None,
+    });
+'@
+Insert-Before-Once 'upstream/photocraft/crates/ui-egui/src/menus/items.rs' '    crate::plugin_ui::insert_menu_items(app, &mut items);' 'filter.vravio.removeBackground' $aiCutoutItem
+$aiCutoutCommand = @'
+    if id == "filter.vravio.removeBackground" {
+        let doc = app.session.active().ok_or("no document is open".to_string());
+        return Some(doc.and_then(|doc| {
+            let export = app.services.export.as_ref().ok_or("PNG export is unavailable")?;
+            let (bytes, _) = export(&doc.doc, "vravio-cutout-input.png", &crate::ExportSettings::default())?;
+            let write = app.services.write.as_mut().ok_or("browser bridge is unavailable")?;
+            write("vravio-cutout-input.png", &bytes)?;
+            Ok(json!({"sent": true}))
+        }));
+    }
+'@
+Insert-Before-Once 'upstream/photocraft/crates/ui-egui/src/menus/invoke.rs' '    if id == "filter.vravio.photoRestore"' 'if id == "filter.vravio.removeBackground" {' $aiCutoutCommand
 $aiToolsCommand = @'
     if id == "filter.vravio.aiTools" {
         let doc = app.session.active().ok_or("no document is open".to_string());
@@ -337,14 +362,18 @@ Insert-After-Once 'upstream/photocraft/apps/photocraft-web/src/web.rs' 'fn downl
 foreach ($catalog in @(
   @('ru', @(
     @('Restore Old Photos…', 'Реставрация старых фото…'),
-    @('Depth Map and Upscale (AI)…', 'Карта глубины и увеличение (ИИ)…'),
+    @('AI', 'ИИ'),
+    @('Remove Background…', 'Удалить фон…'),
+    @('Depth Map and Upscale…', 'Карта глубины и увеличение…'),
     @('Restored', 'Восстановлено'),
     @('Upscaled ×4', 'Увеличено ×4'),
     @('File name and format (.psd, .ora, .png, .jpg, .tif):', 'Имя и формат файла (.psd, .ora, .png, .jpg, .tif):'),
     @('Save the document before closing it', 'Сначала сохраните документ перед закрытием'))),
   @('uk', @(
     @('Restore Old Photos…', 'Реставрація старих фото…'),
-    @('Depth Map and Upscale (AI)…', 'Карта глибини та збільшення (ШІ)…'),
+    @('AI', 'ШІ'),
+    @('Remove Background…', 'Видалити фон…'),
+    @('Depth Map and Upscale…', 'Карта глибини та збільшення…'),
     @('Restored', 'Відновлено'),
     @('Upscaled ×4', 'Збільшено ×4'),
     @('File name and format (.psd, .ora, .png, .jpg, .tif):', "Ім'я та формат файлу (.psd, .ora, .png, .jpg, .tif):"),
