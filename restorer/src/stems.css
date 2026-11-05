@@ -1,0 +1,22 @@
+/* Over cutout.css: the stem separation dialog only. */
+html,body{height:100%}
+#stems-app{height:100vh;min-height:0;display:flex;flex-direction:column}
+#stems-app .controls{row-gap:10px}
+#stems-app .controls .group{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+#stems-app .clip{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
+#stems-app .hint{color:#a8a8b0;font-size:12px;flex-basis:100%}
+#stems-app .stems{flex:1;min-height:0;overflow:auto;padding:12px 16px;display:flex;flex-direction:column;gap:10px}
+#stems-app .stems p{color:#999;margin:auto;text-align:center}
+#stems-app .stem{display:grid;grid-template-columns:90px minmax(0,1fr) auto;align-items:center;gap:12px;padding:8px 10px;background:#1d1d1f;border-radius:6px}
+#stems-app .stem audio{width:100%;min-width:0;height:34px}
+#stems-app .stem a{color:#c9a6ff;font-size:12px;white-space:nowrap}
+#stems-app footer{gap:8px 10px}
+#stems-app footer #status{flex:1 1 220px;min-width:0}
+#stems-app footer #status.warn{color:#ffcf6b}
+#stems-app footer progress{flex:1 1 120px;min-width:80px}
+@media (max-width:560px){
+  #stems-app header, #stems-app footer, #stems-app .controls{padding-left:12px;padding-right:12px}
+  #stems-app .stem{grid-template-columns:minmax(0,1fr) auto}
+  #stems-app .stem audio{grid-column:1/-1;grid-row:2}
+  #stems-app footer button{flex:1 1 auto}
+}

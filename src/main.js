@@ -634,6 +634,31 @@ window.addEventListener('message', event => {
     try { bridge.opener.postMessage({ type: 'vravio-bridge:saved', version: 1, token: bridge.token, bytes: message.bytes }, bridge.origin); } catch { /* opener was closed */ }
     return;
   }
+  // The audio editor's AudioSuite › Separate Stems (AI): the selected clip goes to the stems dialog,
+  // and its stems come back to the audio editor as new tracks.
+  if (message?.type === 'vravio-stems-open') {
+    const audio = tabs.find(t => t.kind === 'audio');
+    if (!audio || frames.get(audio.id)?.contentWindow !== event.source) return;
+    const root = document.querySelector('#restorer-root');
+    closeRestorer();
+    restorerSource = event.source;
+    const russian = (sharedSettings.language || rasterLocale).toLowerCase().startsWith('ru');
+    root.innerHTML = `<div class="restore-scrim"><button class="restore-dismiss" aria-label="${russian ? 'Закрыть окно' : 'Close dialog'}" title="${russian ? 'Закрыть' : 'Close'}">×</button><iframe class="ai-frame stems-frame" title="${russian ? 'Разделение на стемы' : 'Separate stems'}"></iframe></div>`;
+    root.querySelector('.restore-dismiss').onclick = requestCloseRestorer;
+    root.querySelector('.restore-scrim').addEventListener('click', e => { if (e.target.classList.contains('restore-scrim')) requestCloseRestorer(); });
+    const frame = root.querySelector('iframe');
+    const { name, sampleRate, left, right } = message;
+    frame.onload = () => frame.contentWindow.postMessage({ type: 'vravio-stems-input', name, sampleRate, left, right, locale: sharedSettings.language || rasterLocale }, location.origin);
+    frame.src = local('restorer/stems/');
+    return;
+  }
+  if (message?.type === 'vravio-stems-result') {
+    const frame = document.querySelector('#restorer-root iframe.stems-frame');
+    if (frame?.contentWindow !== event.source) return;
+    restorerSource?.postMessage(message, location.origin, message.stems.map(s => s.bytes));
+    closeRestorer();
+    return;
+  }
   if (message?.type === 'vravio-restorer-open' || message?.type === 'vravio-cutout-open' || message?.type === 'vravio-ai-open') {
     const raster = tabs.find(t => t.kind === 'raster');
     if (!raster || frames.get(raster.id)?.contentWindow !== event.source) return;

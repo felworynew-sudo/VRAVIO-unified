@@ -538,6 +538,140 @@ $clipboardRun = @'
         web_clipboard_poll();
 '@
 Insert-After-Once 'upstream/photocraft/apps/photocraft-web/src/web.rs' '    fn logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {' 'web_clipboard_call("takePending"' $clipboardRun.TrimEnd("`r", "`n")
+# Audio: AudioSuite > Other > Separate Stems (AI). The selected audio clip goes to the stems dialog of the
+# unified shell (restorer/stems, HTDemucs in the browser); the stems come back as new tracks at the clip.
+Insert-After-Once 'upstream/soundcraft/crates/engine/catalog/menus.txt' 'AudioSuite > Other > Time Compression Expansion' 'Separate Stems (AI)' 'AudioSuite > Other > Separate Stems (AI)...'
+Insert-Before-Once 'upstream/soundcraft/crates/ui-egui/src/menus.rs' '    ("ui.theme", "Appearance", "", None),' '"vravio.stems"' '    ("vravio.stems", "Separate Stems (AI)…", "AudioSuite > Other > Separate Stems (AI)...", None),'
+Replace-Exact 'upstream/soundcraft/crates/ui-egui/src/menus.rs' 'matches!(i, "audiosuite.process" | "ui.dock" | "ui.dock.reset")' 'matches!(i, "audiosuite.process" | "ui.dock" | "ui.dock.reset" | "vravio.stems")'
+Insert-Before-Once 'upstream/soundcraft/crates/ui-egui/src/menus.rs' '/// Handle UI-layer commands. Returns None when `id` is not a UI command.' 'VRAVIO_STEMS_REQUEST:' @'
+/// VRAVIO: Separate Stems (AI) was chosen. The web shell takes the selected clip to the stems dialog.
+pub static VRAVIO_STEMS_REQUEST: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+'@.TrimEnd("`r", "`n")
+Insert-Before-Once 'upstream/soundcraft/crates/ui-egui/src/menus.rs' '        "app.checkForUpdates" | "help.checkForUpdates" => {' '"vravio.stems" => {' @'
+        "vravio.stems" => {
+            VRAVIO_STEMS_REQUEST.store(true, std::sync::atomic::Ordering::Relaxed);
+            json!({})
+        }
+'@.TrimEnd("`r", "`n")
+$audioStems = @'
+// VRAVIO: AudioSuite > Separate Stems (AI). The selected audio clip goes to the stems dialog in the
+// unified shell; the stems it sends back become new tracks at the clip's position, as one undo step.
+thread_local! {
+    static VRAVIO_STEMS: RefCell<Vec<(String, Vec<u8>)>> = const { RefCell::new(Vec::new()) };
+    static VRAVIO_STEMS_AT: std::cell::Cell<i64> = const { std::cell::Cell::new(0) };
+    static VRAVIO_STEMS_LISTENING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+fn vravio_listen_stems(ctx: &egui::Context) {
+    use wasm_bindgen::closure::Closure;
+    if VRAVIO_STEMS_LISTENING.with(|l| l.replace(true)) {
+        return;
+    }
+    let Some(window) = web_sys::window() else { return };
+    let ctx = ctx.clone();
+    let cb = Closure::<dyn FnMut(web_sys::MessageEvent)>::new(move |event: web_sys::MessageEvent| {
+        let Some(window) = web_sys::window() else { return };
+        if window.location().origin().ok().as_deref() != Some(event.origin().as_str()) {
+            return;
+        }
+        let data = event.data();
+        if js_sys::Reflect::get(&data, &"type".into()).ok().and_then(|v| v.as_string()).as_deref() != Some("vravio-stems-result") {
+            return;
+        }
+        let Ok(list) = js_sys::Reflect::get(&data, &"stems".into()) else { return };
+        let mut stems = Vec::new();
+        for item in js_sys::Array::from(&list).iter() {
+            let name = js_sys::Reflect::get(&item, &"name".into()).ok().and_then(|v| v.as_string()).unwrap_or_else(|| "Stem.wav".into());
+            let Ok(bytes) = js_sys::Reflect::get(&item, &"bytes".into()) else { continue };
+            stems.push((name, js_sys::Uint8Array::new(&bytes).to_vec()));
+        }
+        VRAVIO_STEMS.with(|s| s.borrow_mut().extend(stems));
+        ctx.request_repaint();
+    });
+    if window.add_event_listener_with_callback("message", cb.as_ref().unchecked_ref()).is_ok() {
+        cb.forget();
+    }
+}
+
+/// Send the selected audio clip's samples (its source audio under the clip, before clip gain and
+/// fades) to the stems dialog.
+fn vravio_open_stems(app: &mut SoundApp, ctx: &egui::Context) {
+    let s = app.engine.session();
+    let found = s.edit.selected_clips.iter().filter_map(|id| s.find_clip(*id)).find(|(_, c)| matches!(c.content, soundcraft_model::ClipContent::Audio { .. }));
+    let Some((_, clip)) = found else {
+        app.ui.status = "Select an audio clip to separate into stems".into();
+        return;
+    };
+    let soundcraft_model::ClipContent::Audio { source, offset } = clip.content else { return };
+    let Some(audio) = s.pool.get(source) else {
+        app.ui.status = "The clip's audio is not loaded".into();
+        return;
+    };
+    let Some(first) = audio.buffer.channels.first() else { return };
+    let from = usize::try_from(offset.max(0)).unwrap_or(0).min(first.len());
+    let to = usize::try_from(offset.saturating_add(clip.length).max(0)).unwrap_or(0).min(first.len());
+    if to <= from {
+        app.ui.status = "The clip has no audio".into();
+        return;
+    }
+    let left = &first[from..to];
+    let right = audio.buffer.channels.get(1).filter(|c| c.len() >= to).map_or(left, |c| &c[from..to]);
+    let send = || -> Result<(), String> {
+        let js = |e: wasm_bindgen::JsValue| format!("{e:?}");
+        let window = web_sys::window().ok_or("no window")?;
+        let parent = js_sys::Reflect::get(window.as_ref(), &"parent".into()).map_err(js)?;
+        let post = js_sys::Reflect::get(&parent, &"postMessage".into()).map_err(js)?.dyn_into::<js_sys::Function>().map_err(|_| "no postMessage")?;
+        let message = js_sys::Object::new();
+        js_sys::Reflect::set(&message, &"type".into(), &"vravio-stems-open".into()).map_err(js)?;
+        js_sys::Reflect::set(&message, &"name".into(), &clip.name.as_str().into()).map_err(js)?;
+        js_sys::Reflect::set(&message, &"sampleRate".into(), &wasm_bindgen::JsValue::from_f64(f64::from(audio.buffer.sample_rate))).map_err(js)?;
+        js_sys::Reflect::set(&message, &"left".into(), &js_sys::Float32Array::from(left).into()).map_err(js)?;
+        js_sys::Reflect::set(&message, &"right".into(), &js_sys::Float32Array::from(right).into()).map_err(js)?;
+        post.call2(&parent, &message, &window.location().origin().map_err(js)?.into()).map_err(js)?;
+        Ok(())
+    };
+    let start = clip.start;
+    match send() {
+        Ok(()) => {
+            VRAVIO_STEMS_AT.with(|a| a.set(start));
+            app.ui.status.clear();
+            vravio_listen_stems(ctx);
+        }
+        Err(error) => app.ui.status = format!("Separate Stems: {error}"),
+    }
+}
+
+/// Stems back from the dialog: one new track each at the clip's position, one undo step.
+fn vravio_place_stems(app: &mut SoundApp) {
+    let stems = VRAVIO_STEMS.with(|s| std::mem::take(&mut *s.borrow_mut()));
+    if stems.is_empty() {
+        return;
+    }
+    let at = VRAVIO_STEMS_AT.with(std::cell::Cell::get);
+    let e = &mut app.engine;
+    let before = e.session_arc();
+    let mut added = 0usize;
+    let mut failed = None;
+    for (name, bytes) in &stems {
+        match io::import_audio_bytes(e, name, bytes, None, None, at) {
+            Ok(_) => added += 1,
+            Err(error) => failed = Some(error.to_string()),
+        }
+    }
+    if added > 0 {
+        e.push_undo("Separate Stems", before);
+    }
+    app.ui.status = failed.unwrap_or_else(|| format!("Added {added} stem tracks"));
+}
+'@
+Insert-Before-Once 'upstream/soundcraft/apps/soundcraft-web/src/web.rs' 'const CANVAS_ID:' 'fn vravio_open_stems(' $audioStems
+Insert-After-Once 'upstream/soundcraft/apps/soundcraft-web/src/web.rs' '    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {' 'VRAVIO_STEMS_REQUEST.swap' @'
+        if soundcraft_ui_egui::menus::VRAVIO_STEMS_REQUEST.swap(false, std::sync::atomic::Ordering::Relaxed) {
+            vravio_open_stems(&mut self.app, ctx);
+        }
+        vravio_place_stems(&mut self.app);
+'@.TrimEnd("`r", "`n")
 Insert-After-Once 'upstream/photocraft/apps/photocraft-web/src/web.rs' 'fn download(path: &str, bytes: &[u8]) -> Result<(), String> {' 'return send_bridge_result(path, bytes);' '    if path.starts_with("vravio-bridge-result-") && path.ends_with(".png") { return send_bridge_result(path, bytes); }'
 Replace-Exact 'upstream/filmcraft/crates/ui-egui/src/theme.rs' 'accent: Color32::from_rgb(0x2f, 0x6b, 0xdf)' 'accent: Color32::from_rgb(0xff, 0x00, 0x00)'
 Replace-Exact 'upstream/filmcraft/crates/ui-egui/src/theme.rs' 'accent_hover: Color32::from_rgb(0x3f, 0x7c, 0xe8)' 'accent_hover: Color32::from_rgb(0xff, 0x44, 0x44)'
