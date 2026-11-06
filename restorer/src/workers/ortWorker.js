@@ -15,10 +15,10 @@ async function load({ id, key, url, device, opt = 'all', external }) {
   if (old && old.device === device && JSON.stringify(old.url) === JSON.stringify(url)) return { ok: true, device: old.device, inputName: old.inputName, outputNames: old.outputNames };
   if (old) { try { await old.sess.release(); } catch { /* */ } sessions.delete(key); }
   const ort = await getOrt();
-  const parts = external ? [url, external.url] : [url]; const got = parts.map(() => 0); const sizes = parts.map(() => 0);
-  const report = i => (g, t) => { got[i] = g; sizes[i] = t; self.postMessage({ id, progress: [got.reduce((a, b) => a + b, 0), Math.max(1, sizes.reduce((a, b) => a + b, 0))] }); };
-  const bytes = await fetchModel(url, report(0));
-  const extra = external ? { externalData: [{ path: external.path, data: await fetchModel(external.url, report(1)) }] } : {};
+  const report = () => (got, total) => self.postMessage({ id, progress: [got, total] });
+  // With external weights the graph is small: progress follows the weights alone (no jump back from 100 %).
+  const bytes = await fetchModel(url, external ? () => {} : report());
+  const extra = external ? { externalData: [{ path: external.path, data: await fetchModel(external.url, report()) }] } : {};
   let used = device; let sess;
   try {
     sess = await ort.InferenceSession.create(bytes, { executionProviders: [device], graphOptimizationLevel: opt, ...extra });

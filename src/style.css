@@ -57,6 +57,9 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .choice:hover, .choice:focus-visible { border-color: var(--accent); background: #343b47; outline: none; }
 .choice img { width: 50px; height: 50px; object-fit: contain; }
 @media(max-width: 620px) { .choices { grid-template-columns: repeat(2, 1fr); } .tab { min-width: 94px; } }
+/* AI Denoise progress window (Camera Raw): small, centred, dragged by its title bar; the editor waits behind it. */
+.denoise-scrim { position: fixed; inset: 0; z-index: 20; background: #0003; }
+.denoise-window { position: absolute; left: 50%; top: 42%; transform: translate(-50%, -50%); width: min(400px, calc(100% - 32px)); height: 148px; border: 0; border-radius: 8px; background: transparent; box-shadow: 0 18px 56px #000b; color-scheme: dark; }
 .restore-scrim { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; padding: 24px; background: #050506ce; }
 .restore-scrim iframe { width: min(1000px, 100%); height: min(740px, 100%); border: 1px solid #45454a; border-radius: 9px; background: #141415; box-shadow: 0 24px 80px #000c; }
 .restore-dismiss { position: absolute; top: 8px; right: 10px; z-index: 2; border: 0; background: #29292c; border-radius: 6px; color: #ececf0; font-size: 24px; width: 38px; height: 38px; }

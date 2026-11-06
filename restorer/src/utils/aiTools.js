@@ -125,14 +125,14 @@ export async function upscaleX4(source, hooks = {}) {
   });
 }
 
-// Шумоподавление в полном разрешении: плитки 256×256 с перекрытием 32 пикселя по краям (швы не видны),
-// края кадра дополняются повтором крайних пикселей. Прозрачность исходника сохраняется.
-export async function denoise(source, hooks = {}) {
+// Шумоподавление в полном разрешении: плитки 256×256 с перекрытием по краям (швы не видны),
+// края кадра дополняются повтором крайних пикселей. src — RGBA (Uint8 или Uint16: max 255 или 65535),
+// результат — массив того же вида; прозрачность исходника сохраняется.
+export async function denoisePixels(src, w, h, max, hooks = {}) {
   hooks.onStage?.('denoise-load');
   return withSession('denoise', hooks, async session => {
     hooks.onStage?.('denoise');
-    const w = source.width, h = source.height, src = source.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, w, h).data;
-    const out = makeCanvas(w, h), octx = out.getContext('2d');
+    const out = new src.constructor(src.length);
     const total = Math.ceil(w / D_STEP) * Math.ceil(h / D_STEP), plane = D_TILE * D_TILE;
     let done = 0;
     for (let y0 = 0; y0 < h; y0 += D_STEP) {
@@ -143,23 +143,30 @@ export async function denoise(source, hooks = {}) {
           const sy = Math.min(h - 1, Math.max(0, y0 - D_PAD + j));
           for (let i = 0; i < D_TILE; i++) {
             const p = (sy * w + Math.min(w - 1, Math.max(0, x0 - D_PAD + i))) * 4, t = j * D_TILE + i;
-            x[t] = src[p] / 255; x[plane + t] = src[p + 1] / 255; x[2 * plane + t] = src[p + 2] / 255;
+            x[t] = src[p] / max; x[plane + t] = src[p + 1] / max; x[2 * plane + t] = src[p + 2] / max;
           }
         }
         const y = (await session.run(x, [1, 3, D_TILE, D_TILE]))[session.outputNames[0]].data;
-        const cw = Math.min(D_STEP, w - x0), ch = Math.min(D_STEP, h - y0), img = octx.createImageData(cw, ch);
+        const cw = Math.min(D_STEP, w - x0), ch = Math.min(D_STEP, h - y0);
         for (let j = 0; j < ch; j++) {
           for (let i = 0; i < cw; i++) {
-            const si = (D_PAD + j) * D_TILE + D_PAD + i, di = (j * cw + i) * 4;
-            for (let c = 0; c < 3; c++) img.data[di + c] = Math.round(Math.min(1, Math.max(0, y[c * plane + si])) * 255);
-            img.data[di + 3] = src[((y0 + j) * w + x0 + i) * 4 + 3];
+            const si = (D_PAD + j) * D_TILE + D_PAD + i, di = ((y0 + j) * w + x0 + i) * 4;
+            for (let c = 0; c < 3; c++) out[di + c] = Math.round(Math.min(1, Math.max(0, y[c * plane + si])) * max);
+            out[di + 3] = src[di + 3];
           }
         }
-        octx.putImageData(img, x0, y0);
         done += 1; hooks.onProgress?.(done / total);
         await nextFrame();
       }
     }
-    return { canvas: out, device: session.device };
+    return { pixels: out, device: session.device };
   });
+}
+
+export async function denoise(source, hooks = {}) {
+  const w = source.width, h = source.height, img = source.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, w, h);
+  const { pixels, device } = await denoisePixels(img.data, w, h, 255, hooks);
+  const out = makeCanvas(w, h);
+  out.getContext('2d').putImageData(new ImageData(pixels, w, h), 0, 0);
+  return { canvas: out, device };
 }

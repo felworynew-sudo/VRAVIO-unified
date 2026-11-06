@@ -543,6 +543,8 @@ function requestCloseRestorer() {
   else closeRestorer();
 }
 function closeRestorer() {
+  // An AI Denoise window still running: the raster editor stops waiting for it.
+  if (document.querySelector('#restorer-root iframe.denoise-window')) restorerSource?.postMessage({ type: 'vravio-denoise-result', cancelled: true }, location.origin);
   aiGuard = false;
   restoreGeneration++;
   restoreCleanup?.();
@@ -636,6 +638,39 @@ window.addEventListener('message', event => {
   }
   // The audio editor's AudioSuite › Separate Stems (AI): the selected clip goes to the stems dialog,
   // and its stems come back to the audio editor as new tracks.
+  // Camera Raw's AI Denoise (raster): a small progress window over the editor, like Camera Raw's own.
+  // The layer's 16-bit pixels go in, the denoised ones go back; the title bar drags the window.
+  if (message?.type === 'vravio-denoise-run') {
+    const raster = tabs.find(t => t.kind === 'raster');
+    if (!raster || frames.get(raster.id)?.contentWindow !== event.source) return;
+    closeRestorer();
+    restorerSource = event.source;
+    const root = document.querySelector('#restorer-root');
+    const russian = rasterLocale.toLowerCase().startsWith('ru');
+    root.innerHTML = `<div class="denoise-scrim"><iframe class="denoise-window" title="${russian ? 'ИИ-шумоподавление' : 'AI Denoise'}"></iframe></div>`;
+    const frame = root.querySelector('iframe');
+    const { width, height, data, amount } = message;
+    frame.onload = () => { frame.contentWindow.postMessage({ type: 'vravio-denoise-input', width, height, data, amount, locale: rasterLocale }, location.origin); frame.contentWindow.focus(); };
+    frame.src = local('restorer/denoise/');
+    return;
+  }
+  if (message?.type === 'vravio-denoise-move') {
+    const frame = document.querySelector('#restorer-root iframe.denoise-window');
+    if (frame?.contentWindow !== event.source) return;
+    const r = frame.getBoundingClientRect();
+    // Some of the window always stays on screen, so it can be dragged back.
+    const x = Math.min(innerWidth - 80, Math.max(80 - r.width, r.left + message.dx)), y = Math.min(innerHeight - 40, Math.max(0, r.top + message.dy));
+    Object.assign(frame.style, { left: `${x}px`, top: `${y}px`, transform: 'none' });
+    return;
+  }
+  if (message?.type === 'vravio-denoise-result') {
+    const frame = document.querySelector('#restorer-root iframe.denoise-window');
+    if (frame?.contentWindow !== event.source) return;
+    frame.remove(); // before closeRestorer: it would report a cancel for a window still open
+    restorerSource?.postMessage(message, location.origin);
+    closeRestorer();
+    return;
+  }
   if (message?.type === 'vravio-stems-open') {
     const audio = tabs.find(t => t.kind === 'audio');
     if (!audio || frames.get(audio.id)?.contentWindow !== event.source) return;

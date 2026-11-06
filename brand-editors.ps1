@@ -355,6 +355,219 @@ $aiDenoiseCommand = @'
     }
 '@
 Insert-Before-Once 'upstream/photocraft/crates/ui-egui/src/menus/invoke.rs' '    if id == "filter.vravio.photoRestore"' 'if id == "filter.vravio.aiDenoise" {' $aiDenoiseCommand
+# AI Denoise in Camera Raw's Detail panel (checkbox + amount, like Camera Raw's Denoise): on OK the
+# layer goes as 16-bit RGBA to the shell's small progress window (restorer/denoise, SCUNet), and the
+# result comes back into the same layer as one history step.
+Insert-Before-Once 'upstream/photocraft/crates/ui-egui/src/dialogs/camera_raw_ui.rs' 'const PROXY_SIDE: usize = 900;' 'VRAVIO_AI_DENOISE:' @'
+/// VRAVIO: AI Denoise in Detail: the checkbox and its amount (Camera Raw's default 50).
+pub static VRAVIO_AI_DENOISE: std::sync::Mutex<(bool, f32)> = std::sync::Mutex::new((false, 50.0));
+/// Set on OK with AI Denoise on: the layer (`None`: the opened raw's active layer) and the amount.
+pub static VRAVIO_AI_DENOISE_RUN: std::sync::Mutex<Option<(Option<LayerId>, f32)>> = std::sync::Mutex::new(None);
+
+'@
+Insert-Before-Once 'upstream/photocraft/crates/ui-egui/src/dialogs/camera_raw_ui/controls.rs' '                widgets::section_label(ui, tl!("Sharpening"));' 'vravio-ai-denoise' @'
+                // VRAVIO: AI Denoise (SCUNet in the browser), applied after OK like Camera Raw's Denoise.
+                ui.push_id("vravio-ai-denoise", |ui| {
+                    let mut state = super::VRAVIO_AI_DENOISE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                    let smart = matches!(d.target, Target::SmartFilter(_));
+                    ui.add_enabled_ui(!smart, |ui| {
+                        widgets::checkbox(ui, &mut state.0, tl!("AI Denoise"));
+                        ui.add_enabled_ui(state.0, |ui| {
+                            let mut quiet = false;
+                            row(ui, &mut quiet, "Amount", &mut state.1, 0.0..=100.0, None);
+                        });
+                    });
+                    let note = if smart { tl!("AI Denoise isn't available for smart filters") } else { tl!("Applied after OK; a large photo can take a few minutes") };
+                    ui.label(egui::RichText::new(note).small().weak());
+                    ui.add_space(6.0);
+                });
+'@
+Insert-Before-Once 'upstream/photocraft/crates/ui-egui/src/dialogs/camera_raw_ui/controls.rs' "    match action {`n        Some(`"ok`") => {" 'vravio_denoise_target =' @'
+    // VRAVIO: AI Denoise runs after OK (the shell's progress window); the checkbox resets either way.
+    let vravio_denoise_target = match action {
+        Some("ok") | Some("cancel") => {
+            let mut state = super::VRAVIO_AI_DENOISE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            let on = std::mem::take(&mut state.0);
+            let amount = state.1;
+            app.camera_raw.as_ref().filter(|_| on && action == Some("ok")).and_then(|d| match d.target {
+                Target::NewFilter => Some((Some(d.layer), amount)),
+                Target::OpenRaw => Some((None, amount)),
+                Target::SmartFilter(_) => None,
+            })
+        }
+        _ => None,
+    };
+'@
+Replace-Exact 'upstream/photocraft/crates/ui-egui/src/dialogs/camera_raw_ui/controls.rs' @'
+        Some("ok") => {
+            if let Err(e) = commit(app) {
+                app.ui.status = e;
+            }
+        }
+'@ @'
+        Some("ok") => {
+            if let Err(e) = commit(app) {
+                app.ui.status = e;
+            } else if let Some(run) = vravio_denoise_target {
+                *super::VRAVIO_AI_DENOISE_RUN.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(run);
+            }
+        }
+'@
+$aiDenoiseRun = @'
+// VRAVIO: AI Denoise from Camera Raw's Detail panel. On OK the layer goes to the shell's small
+// progress window (SCUNet in the browser) as 16-bit RGBA; the result comes back into the same
+// layer as one history step ("AI Denoise").
+thread_local! {
+    static VRAVIO_DENOISE_JOB: std::cell::RefCell<Option<(photocraft_doc::DocId, photocraft_doc::LayerId, photocraft_geom::Rect)>> = const { std::cell::RefCell::new(None) };
+    static VRAVIO_DENOISE_INBOX: std::cell::RefCell<Option<Result<Vec<u16>, String>>> = const { std::cell::RefCell::new(None) };
+    static VRAVIO_DENOISE_LISTENING: Cell<bool> = const { Cell::new(false) };
+}
+
+fn vravio_listen_denoise(ctx: &egui::Context) {
+    use wasm_bindgen::closure::Closure;
+    if VRAVIO_DENOISE_LISTENING.with(|l| l.replace(true)) {
+        return;
+    }
+    let Some(window) = web_sys::window() else { return };
+    let ctx = ctx.clone();
+    let cb = Closure::<dyn FnMut(web_sys::MessageEvent)>::new(move |event: web_sys::MessageEvent| {
+        let Some(window) = web_sys::window() else { return };
+        if window.location().origin().ok().as_deref() != Some(event.origin().as_str()) {
+            return;
+        }
+        let data = event.data();
+        let get = |key: &str| js_sys::Reflect::get(&data, &key.into()).ok().filter(|v| !v.is_undefined() && !v.is_null());
+        if get("type").and_then(|v| v.as_string()).as_deref() != Some("vravio-denoise-result") {
+            return;
+        }
+        let result = if let Some(pixels) = get("data") {
+            Ok(js_sys::Uint16Array::new(&pixels).to_vec())
+        } else if get("cancelled").and_then(|v| v.as_bool()) == Some(true) {
+            Err(String::new())
+        } else {
+            Err(get("error").and_then(|v| v.as_string()).unwrap_or_else(|| "no result".into()))
+        };
+        VRAVIO_DENOISE_INBOX.with(|i| *i.borrow_mut() = Some(result));
+        ctx.request_repaint();
+    });
+    if window.add_event_listener_with_callback("message", cb.as_ref().unchecked_ref()).is_ok() {
+        cb.forget();
+    }
+}
+
+/// Sends the layer (`None`: the active one) to the shell's AI Denoise window.
+fn vravio_start_denoise(app: &PhotocraftApp, ctx: &egui::Context, layer: Option<photocraft_doc::LayerId>, amount: f32) -> Result<(), String> {
+    if VRAVIO_DENOISE_JOB.with(|j| j.borrow().is_some()) {
+        return Err("AI Denoise is already running".into());
+    }
+    let st = app.session.active().ok_or("no document is open")?;
+    let doc = &st.doc;
+    if doc.mode != photocraft_doc::ColorMode::Rgb {
+        return Err("AI Denoise works on RGB images".into());
+    }
+    let id = layer.or(st.active_layer).ok_or("no layer is selected")?;
+    let surface = doc.layer(id).and_then(|l| match &l.content {
+        photocraft_doc::LayerContent::Raster(s) => Some(s),
+        _ => None,
+    });
+    let surface = surface.ok_or("AI Denoise needs a pixel layer")?;
+    let n = surface.channels();
+    if n < 3 {
+        return Err("AI Denoise works on RGB images".into());
+    }
+    let bounds = doc.bounds();
+    let (w, h) = (bounds.width().max(0) as usize, bounds.height().max(0) as usize);
+    if w == 0 || h == 0 {
+        return Err("the layer is empty".into());
+    }
+    let mut pixels = vec![0u16; w * h * 4];
+    let mut row = Vec::new();
+    for y in 0..h {
+        surface.read_region_into(photocraft_geom::Rect::new(bounds.x0, bounds.y0 + y as i32, bounds.x1, bounds.y0 + y as i32 + 1), &mut row);
+        for x in 0..w {
+            let o = (y * w + x) * 4;
+            for c in 0..3 {
+                pixels[o + c] = (row[x * n + c].clamp(0.0, 1.0) * 65535.0).round() as u16;
+            }
+            pixels[o + 3] = if n > 3 { (row[x * n + 3].clamp(0.0, 1.0) * 65535.0).round() as u16 } else { 65535 };
+        }
+    }
+    let js = |e: wasm_bindgen::JsValue| format!("{e:?}");
+    let window = web_sys::window().ok_or("no window")?;
+    let parent = js_sys::Reflect::get(window.as_ref(), &"parent".into()).map_err(js)?;
+    let post = js_sys::Reflect::get(&parent, &"postMessage".into()).map_err(js)?.dyn_into::<js_sys::Function>().map_err(|_| "no postMessage")?;
+    let message = js_sys::Object::new();
+    js_sys::Reflect::set(&message, &"type".into(), &"vravio-denoise-run".into()).map_err(js)?;
+    js_sys::Reflect::set(&message, &"width".into(), &wasm_bindgen::JsValue::from_f64(w as f64)).map_err(js)?;
+    js_sys::Reflect::set(&message, &"height".into(), &wasm_bindgen::JsValue::from_f64(h as f64)).map_err(js)?;
+    js_sys::Reflect::set(&message, &"amount".into(), &wasm_bindgen::JsValue::from_f64(f64::from(amount))).map_err(js)?;
+    js_sys::Reflect::set(&message, &"data".into(), &js_sys::Uint16Array::from(pixels.as_slice()).into()).map_err(js)?;
+    post.call2(&parent, &message, &window.location().origin().map_err(js)?.into()).map_err(js)?;
+    VRAVIO_DENOISE_JOB.with(|j| *j.borrow_mut() = Some((doc.id, id, bounds)));
+    vravio_listen_denoise(ctx);
+    Ok(())
+}
+
+/// The shell's answer: the denoised RGB goes into the layer (its alpha stays), one history step.
+fn vravio_finish_denoise(app: &mut PhotocraftApp) {
+    let Some(result) = VRAVIO_DENOISE_INBOX.with(|i| i.borrow_mut().take()) else { return };
+    let Some((doc_id, id, bounds)) = VRAVIO_DENOISE_JOB.with(|j| j.borrow_mut().take()) else { return };
+    let pixels = match result {
+        Ok(p) => p,
+        Err(e) if e.is_empty() => {
+            app.ui.status = i18n::t("AI Denoise cancelled").to_string();
+            return;
+        }
+        Err(e) => {
+            app.ui.status = format!("{}: {e}", i18n::t("AI Denoise failed"));
+            return;
+        }
+    };
+    let (w, h) = (bounds.width().max(0) as usize, bounds.height().max(0) as usize);
+    if pixels.len() != w * h * 4 {
+        app.ui.status = format!("{}: wrong result size", i18n::t("AI Denoise failed"));
+        return;
+    }
+    if app.session.active().map(|st| st.doc.id) != Some(doc_id) {
+        let Some(index) = app.session.documents().iter().position(|st| st.doc.id == doc_id) else {
+            app.ui.status = format!("{}: the document was closed", i18n::t("AI Denoise failed"));
+            return;
+        };
+        app.session.set_active(index);
+    }
+    let result = app.session.edit("AI Denoise", |doc, _active| {
+        if doc.bounds() != bounds {
+            return Err(photocraft_engine::EngineError::Other("the document size changed".into()));
+        }
+        let layer = doc.layer_mut(id).ok_or(photocraft_engine::EngineError::NoLayer(id))?;
+        let surface = layer.surface_mut().ok_or_else(|| photocraft_engine::EngineError::Other("the layer is no longer a pixel layer".into()))?;
+        let n = surface.channels();
+        let mut row = Vec::new();
+        for y in 0..h {
+            let r = photocraft_geom::Rect::new(bounds.x0, bounds.y0 + y as i32, bounds.x1, bounds.y0 + y as i32 + 1);
+            surface.read_region_into(r, &mut row);
+            for x in 0..w {
+                for c in 0..3 {
+                    row[x * n + c] = f32::from(pixels[(y * w + x) * 4 + c]) / 65535.0;
+                }
+            }
+            surface.write_region(r, &row);
+        }
+        Ok(())
+    });
+    app.ui.status = match result {
+        Ok(()) => i18n::t("AI Denoise applied").to_string(),
+        Err(e) => format!("{}: {e}", i18n::t("AI Denoise failed")),
+    };
+}
+'@
+Insert-Before-Once 'upstream/photocraft/apps/photocraft-web/src/web.rs' 'const CANVAS_ID:' 'fn vravio_start_denoise(' $aiDenoiseRun
+Insert-Before-Once 'upstream/photocraft/apps/photocraft-web/src/web.rs' '        self.serve_fonts(ctx);' 'VRAVIO_AI_DENOISE_RUN' @'
+        if let Some((layer, amount)) = photocraft_ui_egui::camera_raw_ui::VRAVIO_AI_DENOISE_RUN.lock().unwrap_or_else(PoisonError::into_inner).take() {
+            if let Err(error) = vravio_start_denoise(&self.app, ctx, layer, amount) { self.app.ui.status = format!("{}: {error}", i18n::t("AI Denoise failed")); }
+        }
+        vravio_finish_denoise(&mut self.app);
+'@
 $aiToolsCommand = @'
     if id == "filter.vravio.aiTools" {
         let doc = app.session.active().ok_or("no document is open".to_string());
@@ -393,6 +606,12 @@ foreach ($catalog in @(
     @('AI', 'ИИ'),
     @('Remove Background…', 'Удалить фон…'),
     @('Noise Reduction…', 'Шумоподавление…'),
+    @('AI Denoise', 'ИИ-шумоподавление'),
+    @('Applied after OK; a large photo can take a few minutes', 'Применяется после «ОК»; большой снимок может обрабатываться несколько минут'),
+    @('AI Denoise isn''t available for smart filters', 'ИИ-шумоподавление недоступно для смарт-фильтров'),
+    @('AI Denoise applied', 'ИИ-шумоподавление применено'),
+    @('AI Denoise cancelled', 'ИИ-шумоподавление отменено'),
+    @('AI Denoise failed', 'Ошибка ИИ-шумоподавления'),
     @('Depth Map and Upscale…', 'Карта глубины и увеличение…'),
     @('Restored', 'Восстановлено'),
     @('Upscaled ×4', 'Увеличено ×4'),
@@ -403,6 +622,12 @@ foreach ($catalog in @(
     @('AI', 'ШІ'),
     @('Remove Background…', 'Видалити фон…'),
     @('Noise Reduction…', 'Зменшення шуму…'),
+    @('AI Denoise', 'ШІ-шумозаглушення'),
+    @('Applied after OK; a large photo can take a few minutes', 'Застосовується після «OK»; великий знімок може оброблятися кілька хвилин'),
+    @('AI Denoise isn''t available for smart filters', 'ШІ-шумозаглушення недоступне для смарт-фільтрів'),
+    @('AI Denoise applied', 'ШІ-шумозаглушення застосовано'),
+    @('AI Denoise cancelled', 'ШІ-шумозаглушення скасовано'),
+    @('AI Denoise failed', 'Помилка ШІ-шумозаглушення'),
     @('Depth Map and Upscale…', 'Карта глибини та збільшення…'),
     @('Restored', 'Відновлено'),
     @('Upscaled ×4', 'Збільшено ×4'),
