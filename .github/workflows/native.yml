@@ -1,0 +1,105 @@
+name: Native apps
+# Each environment as its own native app (the upstream desktop editor with the VRAVIO patches and
+# that environment's icon) for Windows, macOS and Linux. With `publish`, the files go into a GitHub
+# release together with the VRAVIO installers of the latest main build; the VRAVIO menu links the
+# latest release's files by their `VRAVIO[-<Name>]-<platform>` prefix.
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish a GitHub release with the built apps
+        type: boolean
+        default: false
+permissions:
+  contents: write
+  actions: read
+concurrency:
+  group: vravio-native-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  icons:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y librsvg2-bin
+      - run: python3 -m pip install --quiet pillow
+      - name: Render the environments' icons
+        run: |
+          python3 scripts/native-icons.py raster photocraft icons/raster
+          python3 scripts/native-icons.py vector vectorcraft icons/vector
+          python3 scripts/native-icons.py audio soundcraft icons/audio
+          python3 scripts/native-icons.py video filmcraft icons/video
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-icons
+          path: icons
+  native:
+    needs: icons
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        kind: [raster, vector, audio, video]
+        os: [windows-latest, macos-latest, ubuntu-22.04]
+        include:
+          - { kind: raster, repo: photocraft }
+          - { kind: vector, repo: vectorcraft }
+          - { kind: audio, repo: soundcraft }
+          - { kind: video, repo: filmcraft }
+    env:
+      CARGO_BUILD_JOBS: 2
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/download-artifact@v4
+        with:
+          name: native-icons
+          path: icons
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: upstream/${{ matrix.repo }}
+          key: native-${{ matrix.kind }}
+      - name: Linux libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libxkbcommon-dev libwayland-dev libx11-dev libxcb1-dev libxcursor-dev \
+            libxrandr-dev libxi-dev libfontconfig1-dev libfreetype-dev libgl1-mesa-dev libgtk-3-dev libasound2-dev libudev-dev
+      - name: Build and pack
+        shell: pwsh
+        run: ./build-native.ps1 -Kind ${{ matrix.kind }} -Icons icons/${{ matrix.kind }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-${{ matrix.kind }}-${{ runner.os }}
+          path: dist/native/*
+          compression-level: 0
+  release:
+    if: inputs.publish
+    needs: native
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: native-*-*
+          path: release
+          merge-multiple: true
+      - name: VRAVIO installers from the latest main build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          run=$(gh run list -R "$GITHUB_REPOSITORY" --workflow web.yml --branch main --status success --limit 1 --json databaseId --jq '.[0].databaseId')
+          gh run download "$run" -R "$GITHUB_REPOSITORY" -n vravio-windows-installer -D win
+          gh run download "$run" -R "$GITHUB_REPOSITORY" -n vravio-macos-universal -D mac
+          cp win/*.exe release/VRAVIO-windows-x64-setup.exe
+          cp mac/*.dmg release/VRAVIO-macos-universal.dmg
+          ls -la release
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="v0.1.${GITHUB_RUN_NUMBER}"
+          gh release create "$tag" release/* -R "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "VRAVIO ${tag}" \
+            --notes "VRAVIO for Windows and macOS, and each environment (Raster, Vector, Audio, Video) as its own app for Windows, macOS (Apple Silicon) and Linux. The builds are not signed: Windows SmartScreen and macOS Gatekeeper ask once before the first start."
