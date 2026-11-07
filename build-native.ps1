@@ -27,6 +27,14 @@ $out = Join-Path $root 'dist/native'
 New-Item -ItemType Directory -Force $out | Out-Null
 
 & (Join-Path $root 'brand-editors.ps1')
+# The brand script renames the editors' names in the UI crates, an enum variant among them
+# (photocraft's ExternalSvgEditor::VectorCraft); the desktop app crate, which only the native
+# build compiles, still names the old variant.
+Get-ChildItem (Join-Path $repo "apps/$repoName/src") -Recurse -Filter '*.rs' | ForEach-Object {
+  $text = [IO.File]::ReadAllText($_.FullName)
+  $next = $text.Replace('ExternalSvgEditor::VectorCraft', 'ExternalSvgEditor::VRAVIO')
+  if ($next -ne $text) { [IO.File]::WriteAllText($_.FullName, $next) }
+}
 # The environment's icon replaces the upstream one under the same file names.
 Copy-Item (Join-Path $Icons '*') (Join-Path $repo 'assets/app-icon') -Recurse -Force
 
