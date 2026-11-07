@@ -245,9 +245,10 @@ Insert-Before-Once 'upstream/photocraft/apps/photocraft-web/src/web.rs' '/// Tri
 Replace-Exact 'upstream/photocraft/apps/photocraft-web/src/web.rs' 'if js_sys::Reflect::get(&data, &"type".into()).ok().and_then(|v| v.as_string()).as_deref() != Some("vravio-restorer-result") { return }' 'let kind = js_sys::Reflect::get(&data, &"type".into()).ok().and_then(|v| v.as_string());'
 Insert-Before-Once 'upstream/photocraft/apps/photocraft-web/src/web.rs' '        let bytes = js_sys::Uint8Array::new(&js_sys::Reflect::get(&data, &"bytes".into()).unwrap_or_default()).to_vec();' 'if !matches!(kind.as_deref()' '        if !matches!(kind.as_deref(), Some("vravio-restorer-result" | "vravio-cutout-result")) { return }'
 Insert-Before-Once 'upstream/photocraft/apps/photocraft-web/src/web.rs' '        let name = js_sys::Reflect::get(&data, &"name".into())' 'cutout_inbox.lock().unwrap_or_else' "        if kind.as_deref() == Some(`"vravio-cutout-result`") {`n            cutout_inbox.lock().unwrap_or_else(PoisonError::into_inner).push(bytes);`n            ctx.request_repaint();`n            return;`n        }"
-Replace-Exact 'upstream/photocraft/apps/photocraft-web/src/web.rs' "type Inbox = Arc<Mutex<Vec<(String, Vec<u8>)>>>;`n`n" "type Inbox = Arc<Mutex<Vec<(String, Vec<u8>)>>>;`ntype CutoutInbox = Arc<Mutex<Vec<Vec<u8>>>>;`ntype RestoreInbox = Arc<Mutex<Vec<(String, Vec<u8>, Vec<u8>)>>>;`ntype TabAction = Arc<Mutex<Option<(String, usize)>>>;`ntype UnifiedSettings = Arc<Mutex<Option<(Option<String>, Option<String>)>>>;`n`n"
-Replace-Exact 'upstream/photocraft/apps/photocraft-web/src/web.rs' 'WebShell { app, inbox, place_inbox, unsaved' 'WebShell { app, inbox, cutout_inbox, restore_inbox, place_inbox, snapshot_requested, snapshot_revisions: HashMap::new(), tab_action, tab_state: String::new(), unified_settings, unsaved'
+Insert-After-Once 'upstream/photocraft/apps/photocraft-web/src/web.rs' 'type PlaceInbox = photocraft_ui_egui::PlaceInbox;' 'type CutoutInbox' "type CutoutInbox = Arc<Mutex<Vec<Vec<u8>>>>;`ntype RestoreInbox = Arc<Mutex<Vec<(String, Vec<u8>, Vec<u8>)>>>;`ntype TabAction = Arc<Mutex<Option<(String, usize)>>>;`ntype UnifiedSettings = Arc<Mutex<Option<(Option<String>, Option<String>)>>>;"
+Replace-Exact 'upstream/photocraft/apps/photocraft-web/src/web.rs' 'WebShell { app, inbox, place_inbox, unsaved' 'WebShell { app, inbox, cutout_inbox, restore_inbox, vravio_place, place_inbox, snapshot_requested, snapshot_revisions: HashMap::new(), tab_action, tab_state: String::new(), unified_settings, unsaved'
 Insert-Before-Once 'upstream/photocraft/apps/photocraft-web/src/web.rs' '    /// Dropped files to place on the active document' '    cutout_inbox: CutoutInbox,' '    cutout_inbox: CutoutInbox,'
+Insert-Before-Once 'upstream/photocraft/apps/photocraft-web/src/web.rs' '    /// Dropped files to place on the active document' '    vravio_place: Inbox,' "    /// VRAVIO: AI results placed on the active document (``mode: current``).`n    vravio_place: Inbox,"
 Insert-Before-Once 'upstream/photocraft/apps/photocraft-web/src/web.rs' '    /// Dropped files to place on the active document' '    restore_inbox: RestoreInbox,' '    restore_inbox: RestoreInbox,'
 $applyAiMask = @'
 fn apply_ai_cutout(app: &mut PhotocraftApp, bytes: &[u8]) -> Result<(), String> {
@@ -281,15 +282,16 @@ fn apply_ai_cutout(app: &mut PhotocraftApp, bytes: &[u8]) -> Result<(), String> 
 '@
 Insert-Before-Once 'upstream/photocraft/apps/photocraft-web/src/web.rs' 'fn send_restore_input' 'fn apply_ai_cutout(app:' $applyAiMask
 Insert-Before-Once 'upstream/photocraft/apps/photocraft-web/src/web.rs' '        self.serve_fonts(ctx);' 'std::mem::take(&mut *self.cutout_inbox' "        let masks = std::mem::take(&mut *self.cutout_inbox.lock().unwrap_or_else(PoisonError::into_inner));`n        for bytes in masks {`n            if let Err(error) = apply_ai_cutout(&mut self.app, &bytes) { self.app.ui.status = format!(`"AI cutout failed: {error}`"); }`n        }`n        let restorations = std::mem::take(&mut *self.restore_inbox.lock().unwrap_or_else(PoisonError::into_inner));`n        for (name, original, restored) in restorations {`n            let result = self.app.open_bytes(&name, &original).and_then(|_| self.app.place_bytes(&format!(`"{}.png`", photocraft_ui_egui::i18n::t(if name.ends_with(`"x4.png`") { `"Upscaled ×4`" } else { `"Restored`" })), restored, None).map(|_| Vec::new()));`n            if let Err(error) = result { self.app.ui.status = format!(`"Restoration failed: {error}`"); }`n        }"
+Insert-Before-Once 'upstream/photocraft/apps/photocraft-web/src/web.rs' '        self.serve_fonts(ctx);' 'self.vravio_place.lock()' "        let places = std::mem::take(&mut *self.vravio_place.lock().unwrap_or_else(PoisonError::into_inner));`n        for (name, bytes) in places {`n            if let Err(error) = self.app.place_bytes(&name, bytes, None) { self.app.ui.status = format!(`"Place failed: {error}`"); }`n        }"
 Replace-Exact 'upstream/photocraft/apps/photocraft-web/Cargo.toml' "photocraft-doc = { workspace = true }`nphotocraft-ui-egui" "photocraft-doc = { workspace = true }`nphotocraft-geom = { workspace = true }`nphotocraft-ui-egui"
 Replace-Exact 'upstream/photocraft/apps/photocraft-web/src/web.rs' 'self.app.open_bytes(&name, &original).and_then(|_| self.app.place_bytes(&format!("{}.png", photocraft_ui_egui::i18n::t(if name.ends_with("x4.png") { "Upscaled ×4" } else { "Restored" })), restored, None).map(|_| Vec::new()))' 'self.app.open_bytes(&name, &original).map(|_| ()).and_then(|_| self.app.place_bytes(&format!("{}.png", photocraft_ui_egui::i18n::t(if name.ends_with("x4.png") { "Upscaled ×4" } else { "Restored" })), restored, None).map(|_| ()))'
 Replace-Exact 'upstream/photocraft/apps/photocraft-web/src/web.rs' 'fn send_restore_input(bytes: &[u8])' 'fn send_restore_input(path: &str, bytes: &[u8])'
 Replace-Exact 'upstream/photocraft/apps/photocraft-web/src/web.rs' 'js_sys::Reflect::set(&message, &"type".into(), &"vravio-restorer-open".into()).map_err(js)?;' "    let kind = if path.ends_with(`"vravio-cutout-input.png`") { `"vravio-cutout-open`" } else { `"vravio-restorer-open`" };`n    js_sys::Reflect::set(&message, &`"type`".into(), &kind.into()).map_err(js)?;"
 Replace-Exact 'upstream/photocraft/apps/photocraft-web/src/web.rs' 'move |event| {' 'move |event: web_sys::MessageEvent| {'
 Replace-Exact 'upstream/photocraft/apps/photocraft-web/Cargo.toml' '"BeforeUnloadEvent", "AbortController"' '"BeforeUnloadEvent", "MessageEvent", "AbortController"'
-Insert-Before-Once 'upstream/photocraft/apps/photocraft-web/src/web.rs' '                    let place_inbox: Inbox = Arc::default();' 'let cutout_inbox: CutoutInbox' "                    let cutout_inbox: CutoutInbox = Arc::default();`n                    let restore_inbox: RestoreInbox = Arc::default();"
-Insert-After-Once 'upstream/photocraft/apps/photocraft-web/src/web.rs' '                    let place_inbox: Inbox = Arc::default();' 'listen_restore_result(inbox.clone(),' '                    listen_restore_result(inbox.clone(), cutout_inbox.clone(), restore_inbox.clone(), place_inbox.clone(), snapshot_requested.clone(), tab_action.clone(), cc.egui_ctx.clone());'
-Insert-Before-Once 'upstream/photocraft/apps/photocraft-web/src/web.rs' '                    let place_inbox: Inbox = Arc::default();' 'notify_bridge_ready();' '                    notify_bridge_ready();'
+Insert-Before-Once 'upstream/photocraft/apps/photocraft-web/src/web.rs' '                    let place_inbox: PlaceInbox = Arc::default();' 'let cutout_inbox: CutoutInbox' "                    let cutout_inbox: CutoutInbox = Arc::default();`n                    let restore_inbox: RestoreInbox = Arc::default();`n                    let vravio_place: Inbox = Arc::default();"
+Insert-After-Once 'upstream/photocraft/apps/photocraft-web/src/web.rs' '                    let place_inbox: PlaceInbox = Arc::default();' 'listen_restore_result(inbox.clone(),' '                    listen_restore_result(inbox.clone(), cutout_inbox.clone(), restore_inbox.clone(), vravio_place.clone(), snapshot_requested.clone(), tab_action.clone(), cc.egui_ctx.clone());'
+Insert-Before-Once 'upstream/photocraft/apps/photocraft-web/src/web.rs' '                    let place_inbox: PlaceInbox = Arc::default();' 'notify_bridge_ready();' '                    notify_bridge_ready();'
 Insert-After-Once 'upstream/photocraft/apps/photocraft-web/src/web.rs' 'fn download(path: &str, bytes: &[u8]) -> Result<(), String> {' 'return send_restore_input(path, bytes);' '    if path.ends_with("vravio-restoration-input.png") || path.ends_with("vravio-cutout-input.png") { return send_restore_input(path, bytes); }'
 # AI depth map and x4 upscale (restorer/ai): own menu item, own bridge message; restore/cutout lines stay untouched.
 $aiToolsItem = @'
@@ -1059,7 +1061,7 @@ Replace-Exact $rasterWeb 'fn listen_restore_result(inbox: Inbox, cutout_inbox: C
 Replace-Exact $rasterWeb 'type RestoreInbox = Arc<Mutex<Vec<(String, Vec<u8>, Vec<u8>)>>>;' "type RestoreInbox = Arc<Mutex<Vec<(String, Vec<u8>, Vec<u8>)>>>;`ntype TabAction = Arc<Mutex<Option<(String, usize)>>>;"
 Replace-Exact $rasterWeb '                    cc.egui_ctx.data_mut(|data| data.insert_temp(egui::Id::new("vravio-unified-tabs"), true));' ''
 Insert-Before-Once $rasterWeb '                    notify_bridge_ready();' 'let tab_action: TabAction' '                    let tab_action: TabAction = Arc::default();'
-Replace-Exact $rasterWeb 'listen_restore_result(inbox.clone(), cutout_inbox.clone(), restore_inbox.clone(), place_inbox.clone(), snapshot_requested.clone(), cc.egui_ctx.clone());' 'listen_restore_result(inbox.clone(), cutout_inbox.clone(), restore_inbox.clone(), place_inbox.clone(), snapshot_requested.clone(), tab_action.clone(), cc.egui_ctx.clone());'
+Replace-Exact $rasterWeb 'listen_restore_result(inbox.clone(), cutout_inbox.clone(), restore_inbox.clone(), vravio_place.clone(), snapshot_requested.clone(), cc.egui_ctx.clone());' 'listen_restore_result(inbox.clone(), cutout_inbox.clone(), restore_inbox.clone(), vravio_place.clone(), snapshot_requested.clone(), tab_action.clone(), cc.egui_ctx.clone());'
 Replace-Exact $rasterWeb 'place_inbox, snapshot_requested, snapshot_revisions: HashMap::new(), unsaved' 'place_inbox, snapshot_requested, snapshot_revisions: HashMap::new(), tab_action, tab_state: String::new(), unified_settings, unsaved'
 Insert-After-Once $rasterWeb '    restore_inbox: RestoreInbox,' '    tab_state: String,' "    snapshot_requested: Arc<AtomicBool>,`n    snapshot_revisions: HashMap<u64, u64>,`n    tab_action: TabAction,`n    tab_state: String,"
 $tabStateMethod = @'
@@ -1212,7 +1214,7 @@ Insert-After-Once $audioWeb '    fn logic(&mut self, ctx: &egui::Context, _frame
 
 $videoWeb = 'upstream/filmcraft/apps/filmcraft-web/src/lib.rs'
 Insert-After-Once $videoWeb '    pub autosave: recovery::Autosave,' 'tab_state: String,' '    tab_state: String,'
-Replace-Exact $videoWeb 'WebApp { app, audio, autosave: recovery::Autosave::default() }' 'WebApp { app, audio, autosave: recovery::Autosave::default(), tab_state: String::new() }'
+Replace-Exact $videoWeb 'WebApp { app, audio, autosave: recovery::Autosave::default(), host: host_for_app }' 'WebApp { app, audio, autosave: recovery::Autosave::default(), host: host_for_app, tab_state: String::new() }'
 $videoTabSender = @'
 fn vravio_send_tab(payload: &str) -> Result<(), String> {
     use wasm_bindgen::JsCast as _;
@@ -1304,7 +1306,7 @@ fn send_clipboard_image(width: u32, height: u32, pixels: &[u8]) -> Result<(), St
 Insert-Before-Once $rasterWeb 'fn send_bridge_result(path: &str, bytes: &[u8])' 'fn send_clipboard_image(' $clipboardSender
 Insert-Before-Once $rasterWeb '        import: Some(Box::new(|name: &str, bytes: &[u8], opts: &photocraft_io::ImportOptions|' 'clipboard_set_image: Some(Box::new(|width, height, pixels|' "        clipboard_set_image: Some(Box::new(|width, height, pixels| { web_clipboard_write(width, height, pixels); send_clipboard_image(width, height, pixels) })),`n        clipboard_get_image: Some(Box::new(web_clipboard_peek)),"
 Insert-Before-Once $rasterWeb '                    notify_bridge_ready();' 'let snapshot_requested = Arc::new(AtomicBool::new(false));' '                    let snapshot_requested = Arc::new(AtomicBool::new(false));'
-Replace-Exact $rasterWeb 'listen_restore_result(inbox.clone(), cutout_inbox.clone(), restore_inbox.clone(), place_inbox.clone(), cc.egui_ctx.clone());' 'listen_restore_result(inbox.clone(), cutout_inbox.clone(), restore_inbox.clone(), place_inbox.clone(), snapshot_requested.clone(), tab_action.clone(), cc.egui_ctx.clone());'
+Replace-Exact $rasterWeb 'listen_restore_result(inbox.clone(), cutout_inbox.clone(), restore_inbox.clone(), vravio_place.clone(), cc.egui_ctx.clone());' 'listen_restore_result(inbox.clone(), cutout_inbox.clone(), restore_inbox.clone(), vravio_place.clone(), snapshot_requested.clone(), tab_action.clone(), cc.egui_ctx.clone());'
 Insert-After-Once $rasterWeb '    restore_inbox: RestoreInbox,' '    snapshot_revisions: HashMap<u64, u64>,' "    snapshot_requested: Arc<AtomicBool>,`n    snapshot_revisions: HashMap<u64, u64>,"
 $snapshotMethod = @'
     fn snapshot_dirty(&mut self) {
@@ -1826,17 +1828,17 @@ $cloudChip = @'
 '@
 Insert-Before-Once $vectorMenu '        if ui.selectable_label(st.class.is_none(), egui::RichText::new(tl!("Any Kind")).size(11.0)).clicked() {' 'tl!("Show Cloud Fonts")' $cloudChip.TrimEnd("`r", "`n")
 $wantedOld = @'
-            if st.favorites_only && !favorite(f) {
-                return false;
-            }
+    if st.favorites_only && !look.favorites.iter().any(|x| x.eq_ignore_ascii_case(f)) {
+        return false;
+    }
 '@
 $wantedNew = @'
-            if st.favorites_only && !favorite(f) {
-                return false;
-            }
-            if st.cloud_only && !vectorcraft_text::cloud::contains(f) {
-                return false;
-            }
+    if st.favorites_only && !look.favorites.iter().any(|x| x.eq_ignore_ascii_case(f)) {
+        return false;
+    }
+    if st.cloud_only && !vectorcraft_text::cloud::contains(f) {
+        return false;
+    }
 '@
 Replace-Exact $vectorMenu $wantedOld.TrimEnd("`r", "`n") $wantedNew.TrimEnd("`r", "`n")
 $markOld = '        let sample_rect = egui::Rect::from_min_max(rect.min + vec2(name_w, 2.0), rect.max - vec2(STAR + 2.0, 2.0));'
