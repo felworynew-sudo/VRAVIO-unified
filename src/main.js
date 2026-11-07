@@ -372,6 +372,7 @@ function render() {
     <div id="modal-root"></div><div id="restorer-root"></div><div id="recovery-root"></div>`;
   app.querySelector('.tabs').setAttribute('aria-label', uiText('Рабочие среды', 'Workspaces'));
   app.querySelector('.tabs').innerHTML = `
+      <button class="tab-menu" id="vravio-menu" aria-haspopup="dialog" aria-expanded="${menuOpen}" title="${uiText('Меню VRAVIO: настройки, приложения', 'VRAVIO menu: settings, apps')}" aria-label="${uiText('Меню VRAVIO', 'VRAVIO menu')}"><img src="${local('assets/app-icon.png')}" alt=""></button>
       ${tabs.map(tab => {
         const dirty = documentStates.get(tab.kind)?.documents.some(document => document.dirty);
         const name = environmentName(tab.kind);
@@ -392,7 +393,7 @@ function render() {
   workarea.querySelector('.audio-welcome')?.remove();
   if (!active) workarea.insertAdjacentHTML('beforeend', `<div class="welcome"><img src="${local('assets/logo.svg')}" alt="VRAVIO"><h1>${uiText('Выберите рабочую среду', 'Choose a workspace')}</h1><p>${uiText('Растр, вектор, аудио и видео в одном окне.', 'Raster, vector, audio and video in one window.')}</p><button id="welcome-new">${uiText('Открыть среду', 'Open workspace')}</button></div>`);
   const modal = app.querySelector('#modal-root');
-  modal.innerHTML = chooserOpen ? `<div class="scrim" id="scrim"><div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dialog-title"><div class="dialog-head"><h2 id="dialog-title">${uiText('Открыть рабочую среду', 'Open workspace')}</h2><button id="dismiss" aria-label="${uiText('Закрыть', 'Close')}">×</button></div><p>${uiText('Документы создаются внутри выбранного редактора.', 'Create documents inside the selected editor.')}</p><div class="choices">${Object.entries(environments).map(([key, e]) => `<button class="choice" data-create="${key}" style="--accent:${e.color}"><img src="${e.icon}" alt=""><span>${environmentName(key)}</span></button>`).join('')}</div></div></div>` : '';
+  modal.innerHTML = menuOpen ? menuHtml() : chooserOpen ? `<div class="scrim" id="scrim"><div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dialog-title"><div class="dialog-head"><h2 id="dialog-title">${uiText('Открыть рабочую среду', 'Open workspace')}</h2><button id="dismiss" aria-label="${uiText('Закрыть', 'Close')}">×</button></div><p>${uiText('Документы создаются внутри выбранного редактора.', 'Create documents inside the selected editor.')}</p><div class="choices">${Object.entries(environments).map(([key, e]) => `<button class="choice" data-create="${key}" style="--accent:${e.color}"><img src="${e.icon}" alt=""><span>${environmentName(key)}</span></button>`).join('')}</div></div></div>` : '';
   for (const holder of workarea.querySelectorAll('[data-frame]')) {
     const id = Number(holder.dataset.frame);
     if (!tabs.some(t => t.id === id)) { holder.remove(); frames.delete(id); }
@@ -506,6 +507,8 @@ function render() {
     frames.get(tab.id).title = environmentName(tab.kind);
   }
   app.querySelector('#add').onclick = showChooser;
+  app.querySelector('#vravio-menu').onclick = () => (menuOpen ? hideMenu() : showMenu());
+  if (menuOpen) bindMenu();
   if (active?.kind === 'audio' && audioWelcome) {
     workarea.insertAdjacentHTML('beforeend', `<div class="audio-welcome"><h1>VRAVIO</h1><p>${uiText('Начните работу со звуком: создайте сессию или откройте существующую.', 'Create a new audio session or open an existing one.')}</p><div><button data-audio-action="n">${uiText('Новая сессия…', 'New session…')}</button><button data-audio-action="o">${uiText('Открыть…', 'Open…')}</button></div></div>`);
     workarea.querySelectorAll('[data-audio-action]').forEach(button => button.onclick = () => {
@@ -526,15 +529,95 @@ function render() {
     el.onclick = () => selectTab(Number(el.dataset.select));
   });
   app.querySelectorAll('[data-close]').forEach(el => el.onclick = () => closeTab(Number(el.dataset.close)));
-  if (active && !chooserOpen) {
+  if (active && !chooserOpen && !menuOpen) {
     const child = frames.get(active.id)?.contentWindow;
     child?.focus();
     try { child?.document.querySelector('canvas[tabindex]')?.focus(); } catch { /* Cross-origin editor. */ }
   }
 }
 const frames = new Map();
-function showChooser() { chooserOpen = true; render(); }
+function showChooser() { menuOpen = false; chooserOpen = true; render(); }
 function hideChooser() { chooserOpen = false; render(); }
+
+// VRAVIO's own menu (the logo left of the tabs): settings for every environment at once, the
+// downloads and About. Downloads come from the latest GitHub release: an asset counts for a row
+// and a platform when its name starts with `<prefix>-<platform>`, so CI can choose the file type.
+const RELEASES_URL = 'https://github.com/felworynew-sudo/VRAVIO-unified/releases';
+const RELEASES_API = 'https://api.github.com/repos/felworynew-sudo/VRAVIO-unified/releases/latest';
+const PLATFORMS = [['windows', 'Windows'], ['macos', 'macOS'], ['linux', 'Linux']];
+// Each environment's own app is named VRAVIO with only its letter and "IO" shown.
+const DOWNLOADS = [
+  { key: 'vravio', prefix: 'VRAVIO', shown: [0, 1, 2, 3, 4, 5], icon: local('assets/app-icon.png'), ru: 'Все среды в одном окне', en: 'All workspaces in one window' },
+  { key: 'raster', prefix: 'VRAVIO-Raster', shown: [1, 4, 5] },
+  { key: 'vector', prefix: 'VRAVIO-Vector', shown: [0, 4, 5] },
+  { key: 'audio', prefix: 'VRAVIO-Audio', shown: [2, 4, 5] },
+  { key: 'video', prefix: 'VRAVIO-Video', shown: [3, 4, 5] },
+];
+let menuOpen = false;
+let release = null; // null: not asked yet; { loading } | { assets, tag } | { error }
+const wordmark = shown => `<span class="wordmark" aria-hidden="true">${[...'VRAVIO'].map((letter, i) => `<span class="${shown.includes(i) ? '' : 'off'}">${letter}</span>`).join('')}</span>`;
+const formatSize = bytes => `${Math.max(1, Math.round(bytes / 1048576))} ${uiText('МБ', 'MB')}`;
+function loadRelease() {
+  if (release && !release.error) return;
+  release = { loading: true };
+  fetch(RELEASES_API, { headers: { Accept: 'application/vnd.github+json' } })
+    .then(response => response.status === 404 ? { assets: [], tag_name: null } : response.ok ? response.json() : Promise.reject(new Error(`HTTP ${response.status}`)))
+    .then(data => { release = { tag: data.tag_name, assets: (data.assets || []).map(a => ({ name: a.name, url: a.browser_download_url, size: a.size })) }; })
+    .catch(error => { release = { error: error.message }; })
+    .finally(() => { if (menuOpen) render(); });
+}
+function releaseAsset(prefix, platform) {
+  // `VRAVIO-` alone must not match the environments' own `VRAVIO-Raster-…` files.
+  return release?.assets?.find(a => a.name.startsWith(`${prefix}-${platform}`));
+}
+function showMenu() { chooserOpen = false; menuOpen = true; loadRelease(); render(); }
+function hideMenu() { menuOpen = false; render(); }
+function setShared(key, value) {
+  sharedSettings[key] = value;
+  try { localStorage.setItem(settingsKey, JSON.stringify(sharedSettings)); } catch { /* Private mode. */ }
+  if (key === 'language') rasterLocale = value || navigator.language || 'en';
+  document.documentElement.dataset.appearance = sharedSettings.appearance || 'dark';
+  for (const tab of tabs) void applySettings(tab.kind);
+  render();
+}
+function menuHtml() {
+  const language = sharedSettings.language?.slice(0, 2) || '';
+  const appearance = sharedSettings.appearance || 'dark';
+  const option = (group, value, label, current) => `<button class="segment ${value === current ? 'on' : ''}" data-${group}="${value}" aria-pressed="${value === current}">${label}</button>`;
+  const rows = DOWNLOADS.map(row => {
+    const name = row.key === 'vravio' ? 'VRAVIO' : environmentName(row.key);
+    const icon = row.icon || environments[row.key].icon;
+    const links = PLATFORMS.map(([platform, label]) => {
+      const asset = releaseAsset(row.prefix, platform);
+      return asset
+        ? `<a class="get" href="${escapeText(asset.url)}" title="${escapeText(asset.name)} · ${formatSize(asset.size)}" rel="noopener">${label}</a>`
+        : `<span class="get off" title="${release?.loading ? uiText('Проверяем…', 'Checking…') : uiText('Сборка пока не готова', 'Not built yet')}">${label}</span>`;
+    }).join('');
+    const note = row.key === 'vravio' ? uiText(row.ru, row.en) : uiText('Отдельное нативное приложение', 'A separate native app');
+    return `<div class="download-row" style="--accent:${row.key === 'vravio' ? '#a100ff' : environments[row.key].color}"><img src="${icon}" alt=""><div class="download-name">${wordmark(row.shown)}<span>${escapeText(name)} · ${note}</span></div><div class="download-links">${links}</div></div>`;
+  }).join('');
+  const status = release?.loading ? uiText('Проверяем последний выпуск…', 'Checking the latest release…')
+    : release?.error ? `${uiText('Не удалось узнать о выпусках', 'Could not check the releases')}: ${escapeText(release.error)}`
+    : release?.tag ? `${uiText('Выпуск', 'Release')} ${escapeText(release.tag)}`
+    : uiText('Выпусков пока нет: кнопки заработают, когда появятся сборки.', 'No releases yet: the buttons work once builds are published.');
+  return `<div class="scrim" id="menu-scrim"><div class="dialog vravio-menu" role="dialog" aria-modal="true" aria-labelledby="menu-title">
+    <div class="dialog-head"><h2 id="menu-title">${wordmark([0, 1, 2, 3, 4, 5])}</h2><button id="menu-dismiss" aria-label="${uiText('Закрыть', 'Close')}">×</button></div>
+    <section><h3>${uiText('Для всех сред', 'For every workspace')}</h3>
+      <div class="setting"><span>${uiText('Язык', 'Language')}</span><div class="segments">${option('language', 'ru', 'Русский', language)}${option('language', 'en', 'English', language)}${option('language', '', uiText('Как в системе', 'System'), language)}</div></div>
+      <div class="setting"><span>${uiText('Тема', 'Theme')}</span><div class="segments">${option('appearance', 'dark', uiText('Тёмная', 'Dark'), appearance)}${option('appearance', 'light', uiText('Светлая', 'Light'), appearance)}</div></div>
+      <p class="hint">${uiText('Остальные настройки у каждой среды свои: в её меню.', 'Each workspace keeps its other settings in its own menu.')}</p></section>
+    <section><h3>${uiText('Скачать приложения', 'Download the apps')}</h3>${rows}<p class="hint" role="status">${status} · <a href="${RELEASES_URL}" rel="noopener">${uiText('Все выпуски', 'All releases')}</a></p></section>
+    <section><h3>${uiText('О VRAVIO', 'About VRAVIO')}</h3><p class="hint">${uiText('Растр, вектор, аудио и видео в одном окне. Редакторы основаны на ArtCraft: PhotoCraft, VectorCraft, SoundCraft и FilmCraft (MIT / Apache-2.0).', 'Raster, vector, audio and video in one window. The editors are based on ArtCraft: PhotoCraft, VectorCraft, SoundCraft and FilmCraft (MIT / Apache-2.0).')}</p></section>
+  </div></div>`;
+}
+function bindMenu() {
+  app.querySelector('#menu-dismiss')?.addEventListener('click', hideMenu);
+  app.querySelector('#menu-scrim')?.addEventListener('click', e => { if (e.target.id === 'menu-scrim') hideMenu(); });
+  app.querySelectorAll('[data-language]').forEach(b => b.onclick = () => setShared('language', b.dataset.language || null));
+  app.querySelectorAll('[data-appearance]').forEach(b => b.onclick = () => setShared('appearance', b.dataset.appearance));
+  // Downloads and the releases page leave the editor alone: a new tab, or the system browser in the app.
+  app.querySelectorAll('.vravio-menu a[href]').forEach(a => a.onclick = event => { event.preventDefault(); window.open(a.href, '_blank', 'noopener'); });
+}
 let aiGuard = false;
 // Окно ИИ само решает, можно ли закрыться сразу: при идущем счёте или невставленном результате оно сначала предупреждает.
 function requestCloseRestorer() {
@@ -556,6 +639,7 @@ document.addEventListener('keydown', event => {
   if (event.key === 'Escape' && document.querySelector('#restorer-root .restore-scrim')) {
     event.preventDefault(); requestCloseRestorer(); return;
   }
+  if (event.key === 'Escape' && menuOpen) { hideMenu(); return; }
   if (event.key === 'Escape' && chooserOpen) { hideChooser(); return; }
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'n') { event.preventDefault(); showChooser(); }
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'w' && activeId !== null && !chooserOpen) { event.preventDefault(); closeTab(activeId); }

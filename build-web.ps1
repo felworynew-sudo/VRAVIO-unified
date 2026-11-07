@@ -6,6 +6,7 @@ New-Item -ItemType Directory -Force $dist, (Join-Path $dist 'src'), (Join-Path $
 Copy-Item (Join-Path $root 'index.html') $dist -Force
 Copy-Item (Join-Path $root 'src\*') (Join-Path $dist 'src') -Force
 Copy-Item (Join-Path $root 'assets\logo.svg') (Join-Path $dist 'assets') -Force
+Copy-Item (Join-Path $root 'assets\app-icon.png') (Join-Path $dist 'assets') -Force
 foreach ($kind in @('raster','vector','audio','video')) { Copy-Item (Join-Path $root "assets\$kind.svg") (Join-Path $dist 'assets') -Force }
 if ($ShellOnly) { Write-Output "Shell built: $dist"; return }
 if (-not (Get-Command trunk -ErrorAction SilentlyContinue)) { throw 'Install Trunk: cargo install trunk --locked' }

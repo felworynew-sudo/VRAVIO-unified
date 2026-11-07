@@ -78,3 +78,39 @@ button { font: inherit; color: inherit; cursor: pointer; }
 :root[data-appearance="light"] .dialog p, :root[data-appearance="light"] .recovery-dialog p { color: #687280; }
 :root[data-appearance="light"] .recovery-row { border-color: #c7cbd2; }
 :root[data-appearance="light"] .recovery-row button, :root[data-appearance="light"] .recovery-later { background: #e9ecf1; border-color: #bfc5cf; color: #252b35; }
+
+/* VRAVIO menu: the logo left of the tabs opens settings for every workspace, downloads and About. */
+.tab-menu { flex: 0 0 34px; display: grid; place-items: center; margin: 3px 2px 3px 4px; padding: 0; border: 0; border-radius: 5px; background: transparent; }
+.tab-menu img { width: 20px; height: 20px; object-fit: contain; }
+.tab-menu:hover, .tab-menu[aria-expanded="true"] { background: #2a2d33; }
+.vravio-menu { width: min(680px, 100%); max-height: calc(100vh - 40px); overflow-y: auto; }
+.vravio-menu section { margin-top: 18px; }
+.vravio-menu h3 { margin: 0 0 10px; font-size: 13px; font-weight: 600; letter-spacing: .02em; text-transform: uppercase; color: #929baa; }
+.vravio-menu .hint { margin: 10px 0 0; font-size: 12px; color: #929baa; }
+.vravio-menu .hint a { color: #c9a6ff; }
+.wordmark { font-weight: 800; letter-spacing: .08em; }
+.wordmark .off { visibility: hidden; }
+.setting { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 6px 0; }
+.segments { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+.segment { padding: 5px 12px; border: 1px solid #414957; border-radius: 6px; background: #2a303a; font-size: 13px; }
+.segment.on { border-color: #a100ff; background: #3a2452; }
+.download-row { display: grid; grid-template-columns: 36px minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 9px 10px; margin-top: 6px; border: 1px solid #343b47; border-radius: 9px; background: #262b34; }
+.download-row img { width: 32px; height: 32px; object-fit: contain; }
+.download-name { display: flex; flex-direction: column; min-width: 0; }
+.download-name .wordmark { font-size: 15px; color: var(--accent); }
+.download-name > span:last-child { font-size: 12px; color: #929baa; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.download-links { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
+.get { padding: 5px 10px; border: 1px solid var(--accent); border-radius: 6px; font-size: 12px; color: inherit; text-decoration: none; white-space: nowrap; }
+.get:hover { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+.get.off { border-color: #414957; color: #6e7685; cursor: default; }
+.get.off:hover { background: none; }
+@media (max-width: 560px) {
+  .download-row { grid-template-columns: 32px minmax(0, 1fr); }
+  .download-links { grid-column: 1 / -1; justify-content: stretch; }
+  .download-links .get { flex: 1 1 0; text-align: center; }
+}
+:root[data-appearance="light"] .tab-menu:hover, :root[data-appearance="light"] .tab-menu[aria-expanded="true"] { background: #d3d8df; }
+:root[data-appearance="light"] .segment, :root[data-appearance="light"] .download-row { background: #e9ecf1; border-color: #c7cbd2; }
+:root[data-appearance="light"] .segment.on { background: #ecdcff; border-color: #a100ff; }
+:root[data-appearance="light"] .get.off { border-color: #c7cbd2; color: #9aa2ae; }
+:root[data-appearance="light"] .vravio-menu .hint a { color: #7a00c2; }
