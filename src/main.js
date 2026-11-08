@@ -590,7 +590,7 @@ function menuHtml() {
     const links = PLATFORMS.map(([platform, label]) => {
       const asset = releaseAsset(row.prefix, platform);
       return asset
-        ? `<a class="get" href="${escapeText(asset.url)}" title="${escapeText(asset.name)} · ${formatSize(asset.size)}" rel="noopener">${label}</a>`
+        ? `<a class="get" href="${escapeText(asset.url)}" target="_blank" rel="noopener" title="${escapeText(asset.name)} · ${formatSize(asset.size)}">${label}</a>`
         : `<span class="get off" title="${release?.loading ? uiText('Проверяем…', 'Checking…') : uiText('Сборка пока не готова', 'Not built yet')}">${label}</span>`;
     }).join('');
     const note = row.key === 'vravio' ? uiText(row.ru, row.en) : uiText('Отдельное нативное приложение', 'A separate native app');
@@ -600,13 +600,14 @@ function menuHtml() {
     : release?.error ? `${uiText('Не удалось узнать о выпусках', 'Could not check the releases')}: ${escapeText(release.error)}`
     : release?.tag ? `${uiText('Выпуск', 'Release')} ${escapeText(release.tag)}`
     : uiText('Выпусков пока нет: кнопки заработают, когда появятся сборки.', 'No releases yet: the buttons work once builds are published.');
+  const where = inDesktopApp ? ` · ${uiText('В приложении кнопка копирует ссылку для браузера', 'In the app a button copies the link for a browser')}` : '';
   return `<div class="scrim" id="menu-scrim"><div class="dialog vravio-menu" role="dialog" aria-modal="true" aria-labelledby="menu-title">
     <div class="dialog-head"><h2 id="menu-title">${wordmark([0, 1, 2, 3, 4, 5])}</h2><button id="menu-dismiss" aria-label="${uiText('Закрыть', 'Close')}">×</button></div>
     <section><h3>${uiText('Для всех сред', 'For every workspace')}</h3>
       <div class="setting"><span>${uiText('Язык', 'Language')}</span><div class="segments">${option('language', 'ru', 'Русский', language)}${option('language', 'en', 'English', language)}${option('language', '', uiText('Как в системе', 'System'), language)}</div></div>
       <div class="setting"><span>${uiText('Тема', 'Theme')}</span><div class="segments">${option('appearance', 'dark', uiText('Тёмная', 'Dark'), appearance)}${option('appearance', 'light', uiText('Светлая', 'Light'), appearance)}</div></div>
       <p class="hint">${uiText('Остальные настройки у каждой среды свои: в её меню.', 'Each workspace keeps its other settings in its own menu.')}</p></section>
-    <section><h3>${uiText('Скачать приложения', 'Download the apps')}</h3>${rows}<p class="hint" role="status">${status} · <a href="${RELEASES_URL}" rel="noopener">${uiText('Все выпуски', 'All releases')}</a></p></section>
+    <section><h3>${uiText('Скачать приложения', 'Download the apps')}</h3>${rows}<p class="hint" role="status">${status}${where} · <a href="${RELEASES_URL}" rel="noopener">${uiText('Все выпуски', 'All releases')}</a></p></section>
     <section><h3>${uiText('О VRAVIO', 'About VRAVIO')}</h3><p class="hint">${uiText('Растр, вектор, аудио и видео в одном окне. Редакторы основаны на ArtCraft: PhotoCraft, VectorCraft, SoundCraft и FilmCraft (MIT / Apache-2.0).', 'Raster, vector, audio and video in one window. The editors are based on ArtCraft: PhotoCraft, VectorCraft, SoundCraft and FilmCraft (MIT / Apache-2.0).')}</p></section>
   </div></div>`;
 }
@@ -615,9 +616,16 @@ function bindMenu() {
   app.querySelector('#menu-scrim')?.addEventListener('click', e => { if (e.target.id === 'menu-scrim') hideMenu(); });
   app.querySelectorAll('[data-language]').forEach(b => b.onclick = () => setShared('language', b.dataset.language || null));
   app.querySelectorAll('[data-appearance]').forEach(b => b.onclick = () => setShared('appearance', b.dataset.appearance));
-  // Downloads and the releases page leave the editor alone: a new tab, or the system browser in the app.
-  app.querySelectorAll('.vravio-menu a[href]').forEach(a => a.onclick = event => { event.preventDefault(); window.open(a.href, '_blank', 'noopener'); });
+  // In the browser the links are plain new-tab links: the download starts there and the editors
+  // stay. The desktop app's webview has no downloads, so there a link is copied for the browser.
+  if (inDesktopApp) app.querySelectorAll('.vravio-menu a[href]').forEach(a => a.onclick = event => {
+    event.preventDefault();
+    void navigator.clipboard.writeText(a.href).then(
+      () => showClipboardStatus(uiText('Ссылка скопирована: вставьте её в браузер, чтобы скачать', 'Link copied: paste it into a browser to download')),
+      () => showClipboardStatus(`${uiText('Откройте в браузере', 'Open in a browser')}: ${a.href}`));
+  });
 }
+const inDesktopApp = location.hostname === 'tauri.localhost' || location.protocol === 'tauri:';
 let aiGuard = false;
 // Окно ИИ само решает, можно ли закрыться сразу: при идущем счёте или невставленном результате оно сначала предупреждает.
 function requestCloseRestorer() {
